@@ -125,7 +125,7 @@ Phase ▰▱▱▱▱▱▱▱ 1 / 8 complete
 | # | Phase | Delivers | Status |
 |:---:|---|---|:---:|
 | 00 | Scaffold | packaging, `mypy --strict`, `ruff`, green CI | ✅ |
-| 01 | Core model | models, protocols, URL normalisation, frontier |  |
+| 01 | Core model | models, protocols, URL normalisation, frontier | 🚧 |
 | 02 | Network layer | async fetcher, retry, rate limit, robots | ⬜ |
 | 03 | Crawl engine | queue, worker pool, cancellation | ⬜ |
 | 04 | Parsing | HTML off the event loop, pluggable checks | ⬜ |
