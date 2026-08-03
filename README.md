@@ -117,15 +117,15 @@ flat, and a benchmark honest enough to report the parts that lost.
 ## Status
 
 ```
-Phase  ▰▱▱▱▱▱▱▱  0 / 8 complete
+Phase ▰▱▱▱▱▱▱▱ 1 / 8 complete
 ```
 
 **What works today:** nothing. The repository is scaffolding and design.
 
 | # | Phase | Delivers | Status |
 |:---:|---|---|:---:|
-| 00 | Scaffold | packaging, `mypy --strict`, `ruff`, green CI | ⬜ |
-| 01 | Core model | models, protocols, URL normalisation, frontier | ⬜ |
+| 00 | Scaffold | packaging, `mypy --strict`, `ruff`, green CI | ✅ |
+| 01 | Core model | models, protocols, URL normalisation, frontier | 🚧 |
 | 02 | Network layer | async fetcher, retry, rate limit, robots | ⬜ |
 | 03 | Crawl engine | queue, worker pool, cancellation | ⬜ |
 | 04 | Parsing | HTML off the event loop, pluggable checks | ⬜ |
