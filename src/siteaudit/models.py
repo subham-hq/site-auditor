@@ -7,7 +7,7 @@ from enum import StrEnum
 class Severity(StrEnum):
     """How serious a check finding is.
 
-    ERROR is the only level with behaviour attached: any ERROR anywhere in
+    ERROR is the only level with behavior attached: any ERROR anywhere in
     the crawl makes the process exit 1, so a build can be gated on it.
     WARNING and INFO are reported and counted but never affect the exit code.
     """
@@ -26,7 +26,7 @@ class Page:
     which is what holds memory flat across a crawl of any size.
 
     Because of that, `html` must never reach the report — build the output
-    record field by field rather than with asdict(), which would serialise
+    record field by field rather than with asdict(), which would serialize
     the entire body.
     """
 
@@ -50,7 +50,7 @@ class Link:
     rather than being recomputed at dequeue time.
     """
 
-    url: str  # resolved, normalised, absolute
+    url: str  # resolved, normalized, absolute
     source_url: str  # the page it was found on
     depth: int  # source depth + 1
     text: str = ""  # anchor text — empty for <img>, bare hrefs
@@ -104,7 +104,7 @@ class AuditReport:
     skipped_robots: int
     skipped_non_http: int
 
-    completed: bool  # False if budget hit or cancelled
+    completed: bool  # False if budget hit or canceled
     slowest: Sequence[tuple[str, float]]  # bounded top-N (url, ms)
 
 
@@ -120,7 +120,7 @@ class Response:
     features not projected here. Adding a field is cheap; the seam is not.
     """
 
-    url: str  # the URL requested, normalised
+    url: str  # the URL requested, normalized
     final_url: str  # after redirects — differs from url when redirected
     status: int
     elapsed_ms: float
