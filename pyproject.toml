@@ -3,7 +3,10 @@ name = "site-auditor"
 description = "Concurrent website crawler and link-health auditor"
 requires-python = ">=3.12"
 dynamic = ["version"]
-dependencies = ["httpx>=0.27"]
+dependencies = [
+    "httpx>=0.27",
+    "url-normalize>=3.0.0",
+]
 
 [project.scripts]
 siteaudit = "siteaudit.cli:main"
