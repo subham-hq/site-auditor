@@ -594,15 +594,30 @@ cost listed is not finished.
      ══════════════════════════════════════════════════════════════════════ -->
 
 <details>
-<summary>🔒 <code>ADR-001</code> · <i>Unlocks at Phase 03</i></summary>
+<summary><code>ADR-001</code> · <b>Response is a local type, not httpx.Response</b></summary>
 
 <br>
 
-*To be written.*
+**Context** — `crawler.py` needs a response object to work with. The obvious
+choice is `httpx.Response`, since httpx is already the HTTP client.
+
+**Decision** — Define a small frozen `Response` dataclass in `models.py` with
+six fields: `url`, `final_url`, `status`, `elapsed_ms`, `content_type`, `text`.
+`fetcher.py` adapts `httpx.Response` into it.
+
+**Alternatives rejected** — Returning `httpx.Response` directly from the
+`Fetcher` protocol. Simpler and better typed, but the protocol would then name
+a third-party type, so `crawler.py` would transitively depend on httpx and the
+dependency rule would be weaker than the README claims. Test fakes would also
+have to construct real HTTP objects — headers, encodings — to exercise a queue.
+
+**Trade-off accepted** — A small adapter in `fetcher.py`, and no access to
+httpx features not projected here. Adding a field is cheap; unpicking the
+coupling later would not be.
+
+**Status** — accepted
 
 </details>
-
-<br>
 
 ---
 
