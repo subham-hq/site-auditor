@@ -16,6 +16,16 @@ class Verdict(StrEnum):
     MALFORMED = "malformed"
 
 
+def _validated_seed(url: str) -> str:
+    """Normalise a seed URL and reject anything the crawler cannot use."""
+    try:
+        normalized = normalize_url(url)
+    except ValueError as exc:
+        raise ValueError(f"invalid seed URL: {url!r}") from exc
+    if not is_crawlable(normalized):
+        raise ValueError(f"seed URL must be http or https: {url!r}")
+    return normalized
+
 class Frontier:
     """The crawl's work queue and its gatekeeper.
 
@@ -35,14 +45,22 @@ class Frontier:
         self._seen: set[str] = set()
         self._accepted = 0
         self._pending: deque[Link] = deque()
-        try:
-            self._seed_url = normalize_url(seed_url)
-        except ValueError as exc:
-            raise ValueError(f"invalid seed URL: {seed_url!r}") from exc
-        if not is_crawlable(self._seed_url):
-            raise ValueError(f"seed URL must be http or https: {seed_url!r}")
+        self._seed_url = _validated_seed(seed_url)
         self._max_depth = max_depth
         self._max_pages = max_pages
+
+    def rebind_seed(self, final_url: str) -> None:  # new — here
+        """Re-point the host check at the seed's final URL after redirects.
+
+        The seed is validated at construction from what the user typed, but a
+        site that canonicalises to www will redirect on the first request, and
+        from then on every internal link is on the redirected host. Call this
+        once, after the seed fetch and before any link is added.
+        """
+
+        if self._seen or self._pending:
+            raise RuntimeError("rebind_seed must be called before any links are added")
+        self._seed_url = _validated_seed(final_url)
 
     def add(self, link: Link) -> Verdict:
         """Offer a link to the frontier and report what was decided.
