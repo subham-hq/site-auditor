@@ -432,7 +432,7 @@ uv run siteaudit https://example.com \
 | Flag | Default | Purpose |
 |---|:---:|---|
 | `--max-depth` | `3` | How far from the seed URL to crawl |
-| `--max-pages` | `500` | Hard ceiling on pages fetched |
+| `--max-pages` | `500` | Hard ceiling on pages admitted to the crawl. Failed fetches still count against it |
 | `--concurrency` | `20` | In-flight request bound |
 | `--timeout` | `10` | Per-request deadline, seconds |
 | `--rate` | `5` | Requests per second, per host |
