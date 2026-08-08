@@ -26,6 +26,7 @@ def _validated_seed(url: str) -> str:
         raise ValueError(f"seed URL must be http or https: {url!r}")
     return normalized
 
+
 class Frontier:
     """The crawl's work queue and its gatekeeper.
 
