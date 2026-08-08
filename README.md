@@ -9,7 +9,7 @@
 <br>
 
 ![status](https://img.shields.io/badge/status-in%20development-F5A623?style=flat-square)
-![phase](https://img.shields.io/badge/phase-00%20%2F%2008-4A5568?style=flat-square)
+![phase](https://img.shields.io/badge/phase-02%20%2F%2008-4A5568?style=flat-square)
 ![python](https://img.shields.io/badge/python-3.12+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![mypy](https://img.shields.io/badge/mypy-strict-0B7A87?style=flat-square)
 ![ruff](https://img.shields.io/badge/lint-ruff-D7FF64?style=flat-square)
@@ -26,7 +26,7 @@
 ---
 
 > [!WARNING]
-> **Not usable yet — this is Phase 00 of 08.**
+> **Not usable yet — this is Phase 02 of 08.**
 > The repository is public from the first commit so the design and the build sequence are
 > visible, not because there is anything to install. Nothing in this document describes
 > working software except where the [Status](#status) table says so.
@@ -117,7 +117,7 @@ flat, and a benchmark honest enough to report the parts that lost.
 ## Status
 
 ```
-Phase ▰▱▱▱▱▱▱▱ 1 / 8 complete
+Phase ▰▱▱▱▱▱▱▱ 2 / 8 complete
 ```
 
 **What works today:** nothing. The repository is scaffolding and design.
@@ -125,8 +125,8 @@ Phase ▰▱▱▱▱▱▱▱ 1 / 8 complete
 | # | Phase | Delivers | Status |
 |:---:|---|---|:---:|
 | 00 | Scaffold | packaging, `mypy --strict`, `ruff`, green CI | ✅ |
-| 01 | Core model | models, protocols, URL normalisation, frontier | 🚧 |
-| 02 | Network layer | async fetcher, retry, rate limit, robots | ⬜ |
+| 01 | Core model | models, protocols, URL normalisation, frontier | ✅ |
+| 02 | Network layer | async fetcher, retry, rate limit, robots | 🚧 |
 | 03 | Crawl engine | queue, worker pool, cancellation | ⬜ |
 | 04 | Parsing | HTML off the event loop, pluggable checks | ⬜ |
 | 05 | Interface | streaming JSONL, console summary, CLI | ⬜ |
