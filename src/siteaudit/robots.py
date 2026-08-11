@@ -28,7 +28,6 @@ class RobotsPolicy:
         self._user_agent = user_agent
         self._cache: dict[str, RobotFileParser | Literal["deny"] | None] = {}
 
-
     async def allows(self, url: str) -> bool:
         """Whether this URL may be fetched.
 
