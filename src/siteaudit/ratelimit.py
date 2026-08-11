@@ -16,10 +16,10 @@ class RateLimiter:
     requests at once, which is the thing that gets a crawler blocked. This also
     costs one float per host instead of four fields plus refill arithmetic.
     """
-    
+
     def __init__(self, *, rate: float) -> None:
         """Pace at `rate` requests per second, per host."""
-        
+
         self._interval = 1.0 / rate
         self._next_allowed: dict[str, float] = {}
 
@@ -43,9 +43,7 @@ class RateLimiter:
 
         now = monotonic()
         slot = max(now, self._next_allowed.get(host, now))
-        self._next_allowed[host] = (
-            slot + self._interval
-        )
+        self._next_allowed[host] = slot + self._interval
 
         if slot > now:
             await asyncio.sleep(slot - now)
