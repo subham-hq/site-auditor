@@ -17,7 +17,7 @@ class Verdict(StrEnum):
 
 
 def _validated_seed(url: str) -> str:
-    """Normalise a seed URL and reject anything the crawler cannot use."""
+    """Normalize a seed URL and reject anything the crawler cannot use."""
     try:
         normalized = normalize_url(url)
     except ValueError as exc:
