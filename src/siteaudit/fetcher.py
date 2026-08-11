@@ -1,10 +1,12 @@
 import asyncio
 from types import TracebackType
+from urllib.parse import urlsplit
 
 import httpx
 
 from siteaudit.errors import FetchError
 from siteaudit.models import Response
+from siteaudit.ratelimit import RateLimiter
 from siteaudit.urls import normalize_url
 
 
@@ -21,11 +23,12 @@ class HttpxFetcher:
     fetch that returned 404, and reporting it is the point of the tool.
     """
 
-    def __init__(self, *, max_concurrency: int, timeout: float) -> None:
+    def __init__(self, *, max_concurrency: int, timeout: float, rate: float) -> None:
         self._client: httpx.AsyncClient | None = None
         self._max_concurrency = max_concurrency
         self._timeout = timeout
         self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._limiter = RateLimiter(rate=rate)
 
     async def __aenter__(self) -> "HttpxFetcher":
         self._client = httpx.AsyncClient(
@@ -61,13 +64,17 @@ class HttpxFetcher:
         `text=None` rather than a binary blob decoded into memory — the link
         is still checked, it just isn't parsed.
 
-        The semaphore bounds how many requests are in flight at once across
-        every caller sharing this fetcher.
+        The semaphore bounds how many requests are in flight; the rate limiter
+        bounds how often they go out, per host. Note the limiter sleeps while the
+        semaphore is held, so a throttled worker occupies a concurrency slot
+        — deliberate, since it also throttles the crawler against a struggling host.
         """
 
         if self._client is None:
             raise RuntimeError("Fetcher must be used inside 'async with'")
         async with self._semaphore:
+            host = urlsplit(url).hostname or ""
+            await self._limiter.acquire(host)
             try:
                 response = await self._client.get(url)
             except httpx.HTTPError as exc:
