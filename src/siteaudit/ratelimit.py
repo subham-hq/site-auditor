@@ -18,8 +18,16 @@ class RateLimiter:
     """
 
     def __init__(self, *, rate: float) -> None:
-        """Pace at `rate` requests per second, per host."""
+        """Pace at `rate` requests per second, per host.
 
+        A non-positive rate is refused here rather than allowed through: zero
+        would raise ZeroDivisionError on the division below, and negative would
+        silently produce a negative interval, meaning every slot is already in
+        the past and the limiter never sleeps at all.
+        """
+
+        if rate <= 0:
+            raise ValueError(f"rate must be positive, got {rate}")
         self._interval = 1.0 / rate
         self._next_allowed: dict[str, float] = {}
 
