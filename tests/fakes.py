@@ -16,15 +16,12 @@ from siteaudit.models import Response
 
 
 class FakeFetcher:
-    """Raises FetchError `failures` times, then returns 200.
+    """A Fetcher backed by a dict of URL to HTML.
 
-    Simulates a transport failure that recovers: DNS resolving on the third
-    attempt, a connection accepted after two refusals. Real hosts cannot be
-    made to fail on demand, and a test that depended on one would be slow,
-    non-deterministic, and would break CI whenever the network hiccuped.
-
-    `calls` is public because counting calls is this fake's entire purpose —
-    asserting on it is how a test proves that retrying happened, or didn't.
+    A URL in the dict returns 200 with that HTML; anything else returns 404
+    with no body, which is what the real fetcher does for a page that is not
+    there. That second behaviour matters as much as the first — a crawl over
+    a site with broken links is the normal case, not the edge case.
     """
 
     def __init__(self, pages: dict[str, str]) -> None:
