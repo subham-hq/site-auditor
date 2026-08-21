@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from siteaudit.decorators import RetryPolicy, retry
 from siteaudit.errors import FetchError
 from siteaudit.models import Response
 from siteaudit.ratelimit import RateLimiter
@@ -23,17 +24,27 @@ class HttpxFetcher:
     fetch that returned 404, and reporting it is the point of the tool.
     """
 
-    def __init__(self, *, max_concurrency: int, timeout: float, rate: float) -> None:
+    def __init__(
+        self,
+        *,
+        max_concurrency: int,
+        timeout: float,
+        rate: float,
+        retry_policy: RetryPolicy | None = None,
+    ) -> None:
         self._client: httpx.AsyncClient | None = None
         self._max_concurrency = max_concurrency
         self._timeout = timeout
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._limiter = RateLimiter(rate=rate)
+        self._retry_policy = retry_policy or RetryPolicy()
+        self._get = retry(self._retry_policy)(self._get_once)
 
     async def __aenter__(self) -> "HttpxFetcher":
         self._client = httpx.AsyncClient(
             timeout=self._timeout,
             follow_redirects=True,
+            limits=httpx.Limits(max_connections=self._max_concurrency),
         )
         return self
 
@@ -47,27 +58,14 @@ class HttpxFetcher:
             await self._client.aclose()
             self._client = None
 
-    async def get(self, url: str) -> Response:
-        """Fetch one URL and return what came back, whatever the status.
+    async def _get_once(self, url: str) -> Response:
+        """One attempt at one URL. Retrying is get()'s job.
 
-        A 4xx or 5xx is a successful fetch that returned an error status, and
-        reporting it is the whole point of the tool — so no raise_for_status()
-        here, ever. Only transport failures raise: DNS, connection refused,
-        timeout, TLS. Those become FetchError, so the caller never learns that
-        httpx is underneath.
-
-        Redirects are followed by the client, so `final_url` may differ from
-        the `url` you passed in; comparing the two is how a redirect is
-        detected downstream.
-
-        The body is read only for text/html. A PDF or an image comes back with
-        `text=None` rather than a binary blob decoded into memory — the link
-        is still checked, it just isn't parsed.
-
-        The semaphore bounds how many requests are in flight; the rate limiter
-        bounds how often they go out, per host. Note the limiter sleeps while the
-        semaphore is held, so a throttled worker occupies a concurrency slot
-        — deliberate, since it also throttles the crawler against a struggling host.
+        The semaphore and the rate limiter both live here, inside a single
+        attempt. A worker waiting on the limiter therefore holds a concurrency
+        slot — deliberate, since that throttles the crawler against a slow host
+        — but a worker backing off between retries does not, because by then
+        this method has already returned.
         """
 
         if self._client is None:
@@ -87,5 +85,33 @@ class HttpxFetcher:
                 status=response.status_code,
                 elapsed_ms=response.elapsed.total_seconds() * 1000,
                 content_type=content_type,
-                text=response.text if content_type.startswith("text/html") else None,
+                text=response.text
+                if content_type.startswith(("text/html", "text/plain"))
+                else None,
             )
+
+    async def get(self, url: str) -> Response:
+        """Fetch one URL and return what came back, whatever the status.
+
+        A 4xx or 5xx is a successful fetch that returned an error status, and
+        reporting it is the whole point of the tool — so no raise_for_status()
+        here, ever. Only transport failures raise: DNS, connection refused,
+        timeout, TLS. Those become FetchError, so the caller never learns that
+        httpx is underneath.
+
+        Transport failures and server-side error statuses are retried with
+        backoff; a 404 is not, because it will not become a 200. The policy is
+        a constructor argument rather than a decorator so it can be tuned from
+        the CLI or shortened in tests.
+
+        Redirects are followed by the client, so `final_url` may differ from
+        the `url` you passed in; comparing the two is how a redirect is
+        detected downstream.
+
+        The body is read for text/html and text/plain — the second because
+        robots.txt is plain text and travels through this same fetcher. A PDF
+        or an image comes back with `text=None` rather than a binary blob
+        decoded into memory: the link is still checked, it just isn't parsed.
+        """
+
+        return await self._get(url)
