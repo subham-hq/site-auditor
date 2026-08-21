@@ -1,8 +1,7 @@
 """The Fetcher protocol seam, exercised through a fake."""
 
-from tests.fakes import FakeFetcher
-
 from siteaudit.protocols import Fetcher
+from tests.fakes import FakeFetcher
 
 
 async def test_fake_fetcher_satisfies_the_protocol() -> None:
