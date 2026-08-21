@@ -1,10 +1,10 @@
 """Retry behaviour: what gets tried again, what does not, and how it ends."""
 
 import pytest
-from tests.fakes import FlakyFetcher, StatusFetcher
 
-from siteaudit.decorators import RetryPolicy, retry
+from siteaudit.decorators import RetryPolicy, jittered_backoff, retry
 from siteaudit.errors import FetchError
+from tests.fakes import FlakyFetcher, StatusFetcher
 
 
 async def test_retry_recovers_after_two_failures() -> None:
@@ -66,3 +66,42 @@ async def test_permanent_status_is_not_retried() -> None:
 
     assert response.status == 404
     assert fetcher.calls == 1
+
+
+def test_backoff_never_exceeds_max_delay() -> None:
+    """The exponential growth stays inside the cap at every attempt.
+
+    Delete the min() and the first few attempts still look reasonable — attempt
+    3 is 4 seconds either way. Attempt 10 is 512 seconds and attempt 20 is 145
+    hours, which is a crawler that appears to hang rather than one that fails.
+    Nothing else in this suite reaches an attempt high enough to notice.
+
+    Sampled repeatedly per attempt because the delay is random: one draw could
+    land under the cap by luck.
+    """
+
+    for attempt in range(30):
+        for _ in range(50):
+            assert 0 <= jittered_backoff(attempt, 0.5, 10.0) <= 10.0
+
+
+def test_backoff_is_jittered() -> None:
+    """Two calls at the same attempt should not return the same delay."""
+    delays = {jittered_backoff(3, 0.5, 10.0) for _ in range(50)}
+    assert len(delays) > 1
+
+
+def test_zero_attempts_is_rejected() -> None:
+    """A policy that would never call the wrapped function is refused at construction.
+
+    Without the guard, attempts=0 skips the loop entirely and the wrapper falls
+    through to `assert last_response is not None` — an AssertionError with an
+    empty message, raised from inside a decorator, several frames from whoever
+    passed the zero. A --retries 0 flag would produce exactly that.
+
+    Validating where the value enters turns it into a message naming the field
+    and the value it got.
+    """
+
+    with pytest.raises(ValueError):
+        RetryPolicy(attempts=0)
