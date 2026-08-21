@@ -36,6 +36,10 @@ class RetryPolicy:
     max_delay: float = 10.0
     retry_statuses: frozenset[int] = RETRY_STATUSES
 
+    def __post_init__(self) -> None:
+        if self.attempts < 1:
+            raise ValueError(f"attempts must be at least 1, got {self.attempts}")
+
 
 def jittered_backoff(attempt: int, base_delay: float, max_delay: float) -> float:
     """How long to wait before the next attempt, in seconds.
@@ -76,10 +80,11 @@ def retry(
     the return type cannot be a free TypeVar. ParamSpec keeps the wrapped
     function's arguments intact, so get(self, url) still typechecks.
 
-    Note the sleep happens while the fetcher's semaphore is held, so a worker
-    backing off holds a concurrency slot. That is deliberate — it throttles
-    the crawler against a struggling host — but it is why a crawl can appear
-    to stall when a site starts returning 503s.
+    The backoff sleep happens between attempts, outside whatever the wrapped
+    function holds. In HttpxFetcher that means the semaphore and the rate
+    limiter are acquired and released within each attempt, so a worker backing
+    off is not occupying a concurrency slot — capacity goes to other URLs while
+    a struggling host is given room.
     """
 
     def decorator(func: Callable[P, Awaitable[Response]]) -> Callable[P, Awaitable[Response]]:
