@@ -9,7 +9,7 @@
 <br>
 
 ![status](https://img.shields.io/badge/status-in%20development-F5A623?style=flat-square)
-![phase](https://img.shields.io/badge/phase-02%20%2F%2008-4A5568?style=flat-square)
+![phase](https://img.shields.io/badge/phase-03%20%2F%2008-4A5568?style=flat-square)
 ![python](https://img.shields.io/badge/python-3.12+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![mypy](https://img.shields.io/badge/mypy-strict-0B7A87?style=flat-square)
 ![ruff](https://img.shields.io/badge/lint-ruff-D7FF64?style=flat-square)
@@ -26,7 +26,7 @@
 ---
 
 > [!WARNING]
-> **Not usable yet — this is Phase 02 of 08.**
+> **Not usable yet — this is Phase 03 of 08.**
 > The repository is public from the first commit so the design and the build sequence are
 > visible, not because there is anything to install. Nothing in this document describes
 > working software except where the [Status](#status) table says so.
@@ -117,7 +117,7 @@ flat, and a benchmark honest enough to report the parts that lost.
 ## Status
 
 ```
-Phase ▰▱▱▱▱▱▱▱ 2 / 8 complete
+Phase ▰▰▰▱▱▱▱▱ 3 / 8 complete
 ```
 
 **What works today:** nothing. The repository is scaffolding and design.
@@ -126,8 +126,8 @@ Phase ▰▱▱▱▱▱▱▱ 2 / 8 complete
 |:---:|---|---|:---:|
 | 00 | Scaffold | packaging, `mypy --strict`, `ruff`, green CI | ✅ |
 | 01 | Core model | models, protocols, URL normalisation, frontier | ✅ |
-| 02 | Network layer | async fetcher, retry, rate limit, robots | 🚧 |
-| 03 | Crawl engine | queue, worker pool, cancellation | ⬜ |
+| 02 | Network layer | async fetcher, retry, rate limit, robots | ✅ |
+| 03 | Crawl engine | queue, worker pool, cancellation | 🚧 |
 | 04 | Parsing | HTML off the event loop, pluggable checks | ⬜ |
 | 05 | Interface | streaming JSONL, console summary, CLI | ⬜ |
 | 06 | Benchmark | four execution models over a fixed corpus | ⬜ |
@@ -142,11 +142,11 @@ Phase ▰▱▱▱▱▱▱▱ 2 / 8 complete
 
 A repository that does nothing, perfectly.
 
-- [ ] `uv init`, `src/` layout, console-script entry point
-- [ ] Toolchain pinned: `ruff`, `mypy`, `pytest`, `pytest-asyncio`, `httpx`
-- [ ] `mypy --strict` configured; `ruff` rules chosen deliberately, not copied
-- [ ] `errors.py` — `AuditError` hierarchy, written before anything can raise
-- [ ] GitHub Actions running lint, type-check and tests on push
+- [x] `uv init`, `src/` layout, console-script entry point
+- [x] Toolchain pinned: `ruff`, `mypy`, `pytest`, `pytest-asyncio`, `httpx`
+- [x] `mypy --strict` configured; `ruff` rules chosen deliberately, not copied
+- [x] `errors.py` — `AuditError` hierarchy, written before anything can raise
+- [x] GitHub Actions running lint, type-check and tests on push
 
 **Done when** `uv run siteaudit --version` prints a version and CI is green on an empty
 test suite.
@@ -160,11 +160,11 @@ test suite.
 
 Everything pure and synchronous, tested to the floor. No network.
 
-- [ ] `models.py` — frozen dataclasses with `slots=True`
-- [ ] `protocols.py` — `Fetcher` and `Check`
-- [ ] `urls.py` — normalisation, same-host predicate, relative resolution
-- [ ] `frontier.py` — dedup set, depth tracking, budget guard
-- [ ] Adversarial URL tests: fragments, uppercase hosts, protocol-relative, `mailto:`,
+- [x] `models.py` — frozen dataclasses with `slots=True`
+- [x] `protocols.py` — `Fetcher` and `Check`
+- [x] `urls.py` — normalisation, same-host predicate, relative resolution
+- [x] `frontier.py` — dedup set, depth tracking, budget guard
+- [x] Adversarial URL tests: fragments, uppercase hosts, protocol-relative, `mailto:`,
       `javascript:`, default ports, percent-encoding
 
 **Done when** `test_urls.py` covers 15+ hostile cases and the frontier refuses duplicates,
@@ -179,10 +179,10 @@ off-host URLs and over-budget URLs.
 
 The network, behind the Protocol.
 
-- [ ] `fetcher.py` — one `AsyncClient`, explicit `httpx.Limits`, async context manager
-- [ ] `decorators.py` — `@retry` with exponential backoff and jitter; policy as data
-- [ ] `ratelimit.py` — per-host token bucket
-- [ ] `robots.py` — fetched once, parsed, honoured
+- [x] `fetcher.py` — one `AsyncClient`, explicit `httpx.Limits`, async context manager
+- [x] `decorators.py` — `@retry` with exponential backoff and jitter; policy as data
+- [x] `ratelimit.py` — per-host even spacing
+- [x] `robots.py` — fetched once, parsed, honoured
 
 **Done when** `FakeFetcher` satisfies the `Fetcher` protocol without inheriting from it, and
 the retry test uses a fetcher that fails twice then succeeds — no mocking library anywhere.
@@ -619,6 +619,85 @@ coupling later would not be.
 
 </details>
 
+
+<details>
+<summary><code>ADR-002</code> · <b>Subdomains are distinct hosts</b></summary>
+
+<br>
+
+**Context** — `is_same_host` bounds the crawl: given a seed, it decides which
+discovered links are in scope. It compares `.hostname`, so `www.example.com`
+and `example.com` are two different hosts. That is strictly correct — they are
+different names — but on most sites they serve the same content, and many sites
+redirect one to the other.
+
+**Decision** — Keep the strict comparison, and handle the redirect case with
+`rebind_seed`. The seed is validated at construction from what the user typed;
+if the first fetch redirects, `rebind_seed` re-points the host check at the
+seed's final URL, so every later comparison is made against the host the site
+actually canonicalises to. It refuses to run once any link has been added, so a
+crawl cannot change hosts partway through.
+
+**Alternatives rejected** — Stripping a leading `www.` before comparing would
+fix the common case in one line, but it is a guess about site structure, and
+wrong for any site where subdomains serve genuinely different content.
+Comparing registrable domains is the more general version and needs the Public
+Suffix List: naive last-two-labels turns `bbc.co.uk` into `co.uk`, so every
+British domain becomes same-host. That is a real dependency for a marginal gain.
+
+**Trade-off accepted** — A seed of `example.com` will not follow links to
+`www.example.com` unless a redirect points it there first. On a site that
+canonicalises to `www` but is reachable at the bare domain without redirecting,
+the crawl finds nothing beyond the seed. The `skipped_off_host` counter is what
+makes that visible rather than silent.
+
+**Status** — accepted
+
+</details>
+
+
+<details>
+<summary><code>ADR-003</code> · <b>protego over the stdlib robots parser</b></summary>
+
+<br>
+
+**Context** — `robots.py` needs to answer whether a URL is permitted. Python
+ships `urllib.robotparser`, so the zero-dependency option was tried first.
+
+Its entire matching logic is `filename.startswith(self.path)` — prefix matching,
+nothing more. No `*` wildcards, no `$` end-anchor, both of which are in RFC 9309
+and both of which real sites rely on. Tested against GitHub's live robots.txt:
+
+| Rule | URL | stdlib | protego |
+|---|---|:---:|:---:|
+| `Disallow: /copilot/` | `/copilot/` | blocked | blocked |
+| `Disallow: /search$` | `/search` | **allowed** | blocked |
+| `Disallow: /*q=` | `/search?q=x` | **allowed** | blocked |
+| `Disallow: /*/*/pulse` | `/a/b/pulse` | **allowed** | blocked |
+
+GitHub's file is almost entirely wildcard rules, so the stdlib would have
+honoured a handful and ignored the rest — while this README claimed robots.txt
+compliance.
+
+**Decision** — Use protego, which implements RFC 9309: wildcards, the `$`
+anchor, and longest-match precedence.
+
+**Alternatives rejected** — Keeping the stdlib. Not a trade of correctness for
+convenience but a silent failure: nothing raises, the crawl looks clean, and
+pages the site owner disallowed get fetched anyway. Hand-rolling the matching
+was never considered — the precedence rules are subtle enough that getting them
+wrong would reproduce exactly the problem being fixed.
+
+**Trade-off accepted** — A third-party dependency where the stdlib would run.
+Mitigated by protego shipping `py.typed`, so `mypy --strict` passes without
+stubs, and by the parser being confined to one module: swapping it again would
+touch `robots.py` and nothing else.
+
+**Status** — accepted
+
+</details>
+
+
 ---
 
 ## Why this exists
@@ -641,7 +720,9 @@ Newest first. One entry per phase — what shipped, and what it cost.
 
 | Date | Phase | Shipped | Notes |
 |---|:---:|---|---|
-| — | — | *nothing yet* | — |
+| 2026-08-19 | 02 | Fetcher, retry, rate limit, robots | Stdlib robots parser silently allowed every wildcard rule; swapped to protego |
+| 2026-08-03 | 01 | Models, protocols, urls, frontier   | is_same_host let mailto: through — None == None |
+| 2026-08-03 | 00 | Scaffold, toolchain, CI            | pyproject missing [build-system]; package never installed |
 
 <details>
 <summary><b>Entry template</b></summary>
