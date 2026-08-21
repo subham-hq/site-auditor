@@ -1,6 +1,7 @@
 from typing import Literal
 from urllib.parse import urlsplit
-from urllib.robotparser import RobotFileParser
+
+from protego import Protego
 
 from siteaudit.errors import FetchError
 from siteaudit.protocols import Fetcher
@@ -17,16 +18,14 @@ class RobotsPolicy:
     every other request — and so a FakeFetcher works in tests. Typed as the
     protocol, never the concrete fetcher.
 
-    Parsing is delegated to the stdlib RobotFileParser: wildcards, longest-match
-    precedence and Allow-overriding-Disallow are subtler than they look. Note
-    it is fed with parse(), never read() — read() does its own synchronous
-    urlopen, which would block the event loop for the length of the request.
+    Parsing is delegated to protego, which supports modern robots.txt matching
+    conventions including wildcards and length-based rule precedence.
     """
 
     def __init__(self, fetcher: Fetcher, *, user_agent: str = USER_AGENT) -> None:
         self._fetcher = fetcher
         self._user_agent = user_agent
-        self._cache: dict[str, RobotFileParser | Literal["deny"] | None] = {}
+        self._cache: dict[str, Protego | Literal["deny"] | None] = {}
 
     async def allows(self, url: str) -> bool:
         """Whether this URL may be fetched.
@@ -43,15 +42,15 @@ class RobotsPolicy:
         host = urlsplit(url).hostname or ""
         if host not in self._cache:
             self._cache[host] = await self._load(host)
-        parser = self._cache[host]
-        if parser is None:
+        cached = self._cache[host]
+        if cached is None:
             return True
-        if parser == "deny":
+        if cached == "deny":
             return False
 
-        return parser.can_fetch(self._user_agent, url)
+        return cached.can_fetch(url, self._user_agent)
 
-    async def _load(self, host: str) -> RobotFileParser | Literal["deny"] | None:
+    async def _load(self, host: str) -> Protego | Literal["deny"] | None:
         """Fetch and parse one host's robots.txt.
 
         Returns a parser when rules exist. Otherwise, a host-wide answer: None
@@ -90,6 +89,4 @@ class RobotsPolicy:
         if response.text is None:
             return None
 
-        parser = RobotFileParser()
-        parser.parse(response.text.splitlines())
-        return parser
+        return Protego.parse(response.text)
