@@ -1,4 +1,3 @@
-from collections import deque
 from dataclasses import replace
 from enum import StrEnum
 
@@ -45,7 +44,6 @@ class Frontier:
     def __init__(self, seed_url: str, *, max_depth: int, max_pages: int) -> None:
         self._seen: set[str] = set()
         self._accepted = 0
-        self._pending: deque[Link] = deque()
         self._seed_url = _validated_seed(seed_url)
         self._max_depth = max_depth
         self._max_pages = max_pages
@@ -59,11 +57,11 @@ class Frontier:
         once, after the seed fetch and before any link is added.
         """
 
-        if self._seen or self._pending:
+        if self._seen:
             raise RuntimeError("rebind_seed must be called before any links are added")
         self._seed_url = _validated_seed(final_url)
 
-    def add(self, link: Link) -> Verdict:
+    def add(self, link: Link) -> tuple[Verdict, Link | None]:
         """Offer a link to the frontier and report what was decided.
 
         Normalisation happens here, not in the caller: the frontier's one
@@ -84,42 +82,18 @@ class Frontier:
         try:
             normalized = normalize_url(link.url)
         except ValueError:
-            return Verdict.MALFORMED
+            return Verdict.MALFORMED, None
         if normalized in self._seen:
-            return Verdict.DUPLICATE
+            return Verdict.DUPLICATE, None
         if not is_crawlable(normalized):
-            return Verdict.NON_HTTP
+            return Verdict.NON_HTTP, None
         if not is_same_host(self._seed_url, normalized):
-            return Verdict.OFF_HOST
+            return Verdict.OFF_HOST, None
         if link.depth > self._max_depth:
-            return Verdict.TOO_DEEP
+            return Verdict.TOO_DEEP, None
         if self._accepted >= self._max_pages:
-            return Verdict.BUDGET_FULL
+            return Verdict.BUDGET_FULL, None
         self._seen.add(normalized)
         self._accepted += 1
         link = replace(link, url=normalized)
-        self._pending.append(link)
-        return Verdict.ACCEPTED
-
-    def pop(self) -> Link | None:
-        """Take the next link off the queue, or None if nothing is pending.
-
-        Returns None rather than raising because an empty frontier is the
-        normal end state, not an error. In Phase 03 this becomes an awaited
-        queue get, which blocks until work arrives instead of returning None.
-        """
-
-        if self._pending:
-            return self._pending.popleft()
-        return None
-
-    def __len__(self) -> int:
-        """How many links are waiting to be crawled.
-
-        Pending only — not URLs seen, not pages accepted. A frontier that has
-        accepted 400 pages and had them all popped has length 0.
-
-        Also makes the object falsy when empty, so `while frontier:` works.
-        """
-
-        return len(self._pending)
+        return Verdict.ACCEPTED, link
