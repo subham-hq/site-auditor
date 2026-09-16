@@ -28,3 +28,18 @@ class Check(Protocol):
     name: str
 
     def run(self, page: Page) -> Sequence[CheckResult]: ...
+
+
+class RobotsChecker(Protocol):
+    """Anything that can say whether a URL may be crawled.
+
+    The third seam, alongside Fetcher and Check. crawler.py consults robots
+    before every fetch, and importing RobotsPolicy directly would break the one
+    rule the engine has: protocols and models, nothing concrete.
+
+    RobotsPolicy already matches this shape without knowing the protocol
+    exists, and a fake that always allows keeps crawl tests from needing a
+    robots fetch at all.
+    """
+
+    async def allows(self, url: str) -> bool: ...
