@@ -101,3 +101,15 @@ class StatusFetcher:
             content_type="text/html",
             text="<html></html>",
         )
+
+
+class FakeRobots:
+    """A RobotsChecker that permits everything.
+
+    Crawl tests are about the queue, the workers and termination. Threading a
+    real robots.txt through them would add a fetch, a parse and a cache to
+    every case while testing none of it — RobotsPolicy has its own six tests.
+    """
+
+    async def allows(self, url: str) -> bool:
+        return True
