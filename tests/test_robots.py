@@ -6,7 +6,7 @@ paying off: RobotsPolicy takes the seam, not a concrete client.
 """
 
 from siteaudit.robots import RobotsPolicy
-from tests.fakes import FakeFetcher, FlakyFetcher, StatusFetcher
+from tests.fakes import FakeFetcher, FakeRobots, FlakyFetcher, StatusFetcher
 
 
 async def test_disallowed_path_is_blocked() -> None:
@@ -95,3 +95,15 @@ async def test_robots_is_fetched_once_per_host() -> None:
         await robot.allows("https://b.com/public")
 
     assert status_fetcher.calls == 2
+
+
+async def test_fake_robots_always_allows() -> None:
+    """A fake that never mentions RobotsChecker is accepted as one.
+
+    The annotation is the assertion, checked by mypy rather than at runtime.
+    A renamed method or a sync def fails here instead of in Phase 03.
+    """
+
+    robots = FakeRobots()
+
+    assert await robots.allows("https://example.com/private")
