@@ -4,6 +4,7 @@ import asyncio
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import MappingProxyType
 
 from siteaudit.errors import FetchError
 from siteaudit.frontier import Frontier, Verdict
@@ -168,14 +169,14 @@ def _build_report(
         finished_at=end_time,
         pages_crawled=stats.pages_crawled,
         links_checked=stats.links_checked,
-        status_counts=stats.status_counts,
+        status_counts=MappingProxyType(dict(stats.status_counts)),
         errors=stats.fetch_errors,
         warnings=0,
         skipped_off_host=stats.verdicts[Verdict.OFF_HOST],
         skipped_robots=stats.skipped_robots,
         skipped_non_http=stats.verdicts[Verdict.NON_HTTP],
         completed=completed,
-        slowest=stats.slowest,
+        slowest=tuple(sorted(stats.slowest, key=lambda row: row[1], reverse=True)[:10]),
     )
 
     return report
