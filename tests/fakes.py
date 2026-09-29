@@ -113,3 +113,18 @@ class FakeRobots:
 
     async def allows(self, url: str) -> bool:
         return True
+
+
+class DenyingRobots:
+    """A RobotsChecker that refuses a fixed set of URLs.
+
+    The sibling of FakeRobots: crawl tests that are about the queue want
+    everything allowed, and exactly one test wants a denial to prove the skip
+    path works.
+    """
+
+    def __init__(self, denied: set[str]) -> None:
+        self._denied = denied
+
+    async def allows(self, url: str) -> bool:
+        return url not in self._denied
