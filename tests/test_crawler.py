@@ -78,7 +78,7 @@ async def test_a_fifty_page_crawl_terminates() -> None:
 
     assert report.pages_crawled == 50
     assert report.links_checked == 49
-    assert report.errors == 0
+    assert report.fetch_errors == 0
     assert report.skipped_robots == 0
     assert report.skipped_off_host == 0
     assert report.skipped_non_http == 0
@@ -135,7 +135,7 @@ async def test_a_single_page_with_no_links_terminates() -> None:
     assert report.pages_crawled == 1
     assert report.completed is True
     assert report.links_checked == 0
-    assert report.errors == 0
+    assert report.fetch_errors == 0
     assert report.skipped_robots == 0
 
 
@@ -353,7 +353,7 @@ async def test_a_transport_failure_does_not_stop_the_crawl() -> None:
     assert report.pages_crawled == 3
 
     # /broken failed at transport level
-    assert report.errors == 1
+    assert report.fetch_errors == 1
 
     # The failure did not kill the crawl.
     assert report.status_counts[200] == 3
