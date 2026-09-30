@@ -99,6 +99,7 @@ class AuditReport:
 
     errors: int
     warnings: int
+    fetch_errors: int
 
     skipped_off_host: int
     skipped_robots: int
