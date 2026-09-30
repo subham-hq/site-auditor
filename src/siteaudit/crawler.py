@@ -69,30 +69,29 @@ async def crawl(
     start_time = datetime.now(UTC)
     stats = _Stats()
 
-    try:
-        frontier = Frontier(seed_url, max_depth=max_depth, max_pages=max_pages)
-        queue: asyncio.Queue[Link] = asyncio.Queue()
-        seed = Link(url=seed_url, source_url="", depth=0)
-        verdict, accepted_seed = frontier.add(seed)
-        if accepted_seed is None:
-            raise ValueError(f"seed URL was rejected by the frontier: {verdict}")
-        queue.put_nowait(accepted_seed)
+    frontier = Frontier(seed_url, max_depth=max_depth, max_pages=max_pages)
+    queue: asyncio.Queue[Link] = asyncio.Queue()
+    seed = Link(url=seed_url, source_url="", depth=0)
+    verdict, accepted_seed = frontier.add(seed)
+    if accepted_seed is None:
+        raise ValueError(f"seed URL was rejected by the frontier: {verdict}")
+    queue.put_nowait(accepted_seed)
 
-        async with asyncio.TaskGroup() as tg:
-            worker_tasks = [
-                tg.create_task(_worker(queue, frontier, fetcher, robots, stats))
-                for _ in range(workers)
-            ]
-            await queue.join()
-            for task in worker_tasks:
-                task.cancel()
+    async with asyncio.TaskGroup() as tg:
+        worker_tasks = [
+            tg.create_task(_worker(queue, frontier, fetcher, robots, stats)) for _ in range(workers)
+        ]
+        await queue.join()
+        for task in worker_tasks:
+            task.cancel()
 
-        completed = stats.verdicts[Verdict.BUDGET_FULL] == 0
-
-    finally:
-        end_time = datetime.now(UTC)
-
-    return _build_report(seed_url, start_time, end_time, stats, completed=completed)
+    return _build_report(
+        seed_url,
+        start_time,
+        datetime.now(UTC),
+        stats,
+        completed=stats.verdicts[Verdict.BUDGET_FULL] == 0,
+    )
 
 
 async def _worker(
@@ -163,20 +162,19 @@ def _build_report(
     mutated through the original reference.
     """
 
-    report = AuditReport(
+    return AuditReport(
         seed_url=seed_url,
         started_at=start_time,
         finished_at=end_time,
         pages_crawled=stats.pages_crawled,
         links_checked=stats.links_checked,
         status_counts=MappingProxyType(dict(stats.status_counts)),
-        errors=stats.fetch_errors,
+        errors=0,
         warnings=0,
+        fetch_errors=stats.fetch_errors,
         skipped_off_host=stats.verdicts[Verdict.OFF_HOST],
         skipped_robots=stats.skipped_robots,
         skipped_non_http=stats.verdicts[Verdict.NON_HTTP],
         completed=completed,
         slowest=tuple(sorted(stats.slowest, key=lambda row: row[1], reverse=True)[:10]),
     )
-
-    return report
