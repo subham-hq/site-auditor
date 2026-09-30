@@ -17,7 +17,7 @@ import pytest
 from siteaudit.crawler import crawl
 from siteaudit.errors import FetchError
 from siteaudit.models import Response
-from tests.fakes import DenyingRobots, FakeFetcher, FakeRobots
+from tests.fakes import DenyingRobots, FakeFetcher, FakeRobots, SlowFetcher
 
 TIMEOUT = 5.0
 SEED = "https://e.com/0"
@@ -78,7 +78,7 @@ async def test_a_fifty_page_crawl_terminates() -> None:
 
     assert report.pages_crawled == 50
     assert report.links_checked == 49
-    assert report.errors == 0
+    assert report.fetch_errors == 0
     assert report.skipped_robots == 0
     assert report.skipped_off_host == 0
     assert report.skipped_non_http == 0
@@ -135,7 +135,7 @@ async def test_a_single_page_with_no_links_terminates() -> None:
     assert report.pages_crawled == 1
     assert report.completed is True
     assert report.links_checked == 0
-    assert report.errors == 0
+    assert report.fetch_errors == 0
     assert report.skipped_robots == 0
 
 
@@ -353,7 +353,7 @@ async def test_a_transport_failure_does_not_stop_the_crawl() -> None:
     assert report.pages_crawled == 3
 
     # /broken failed at transport level
-    assert report.errors == 1
+    assert report.fetch_errors == 1
 
     # The failure did not kill the crawl.
     assert report.status_counts[200] == 3
@@ -498,3 +498,78 @@ async def test_the_report_is_not_mutable_through_its_collections() -> None:
 
     with pytest.raises(AttributeError):
         report.slowest.append(("https://e.com/x", 1.0))  # type: ignore[attr-defined]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cancellation
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def test_a_cancelled_crawl_unwinds_without_hanging() -> None:
+    """Cancelling a crawl mid-flight raises and leaves nothing running.
+
+    CancelledError is allowed to propagate rather than being caught and turned
+    into a partial report. Swallowing it would mean anything wrapping crawl()
+    in a timeout could no longer tell whether its own timeout fired, and that
+    is a worse trade than losing counters the caller never sees anyway.
+
+    Partial output is a Phase 05 concern, not this one: once the JSONL writer
+    streams records to disk as they arrive, an interrupted crawl leaves its
+    completed pages behind for free.
+
+    The timeout is the real assertion. A crawl that hangs on cancellation --
+    workers stuck on queue.get(), or a TaskGroup waiting on tasks that never
+    finish -- fails here with TimeoutError instead of freezing the suite.
+    """
+
+    pages = {f"https://e.com/{i}": f'<a href="/{i + 1}">next</a>' for i in range(200)}
+
+    task = asyncio.create_task(
+        crawl(
+            seed_url=SEED,
+            fetcher=SlowFetcher(pages),
+            robots=FakeRobots(),
+            max_depth=200,
+            max_pages=200,
+            workers=10,
+        )
+    )
+    await asyncio.sleep(0.15)
+    assert not task.done(), "the crawl finished before it could be cancelled"
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=TIMEOUT)
+
+    assert task.cancelled()
+
+
+async def test_a_cancelled_crawl_leaves_no_orphaned_workers() -> None:
+    """No worker outlives the crawl that created it.
+
+    The TaskGroup owns every worker, so cancelling the crawl cancels them with
+    it. Without that ownership a cancelled crawl would leave ten coroutines
+    blocked on queue.get() forever, and Python would only mention it at
+    interpreter shutdown with "Task was destroyed but it is pending".
+    """
+
+    pages = {f"https://e.com/{i}": f'<a href="/{i + 1}">next</a>' for i in range(200)}
+    before = len(asyncio.all_tasks())
+
+    task = asyncio.create_task(
+        crawl(
+            seed_url=SEED,
+            fetcher=SlowFetcher(pages),
+            robots=FakeRobots(),
+            max_depth=200,
+            max_pages=200,
+            workers=10,
+        )
+    )
+    await asyncio.sleep(0.15)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=TIMEOUT)
+
+    await asyncio.sleep(0)
+    assert len(asyncio.all_tasks()) == before
