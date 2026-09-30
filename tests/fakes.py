@@ -10,6 +10,7 @@ No mocking library anywhere, deliberately. A fake that raises on the second
 call is easier to read and harder to get subtly wrong than a patched method
 with a side_effect list.
 """
+import asyncio
 
 from siteaudit.errors import FetchError
 from siteaudit.models import Response
@@ -128,3 +129,39 @@ class DenyingRobots:
 
     async def allows(self, url: str) -> bool:
         return url not in self._denied
+
+class FailingFetcher:
+    def __init__(self, pages: dict[str, str], *, failing: set[str]) -> None:
+        self._inner = FakeFetcher(pages)
+        self._failing = failing
+
+    async def get(self, url: str) -> Response:
+        if url in self._failing:
+            raise FetchError(f"simulated transport failure for {url}")
+        return await self._inner.get(url)
+
+
+class SlowFetcher:
+    """A Fetcher where every request takes `delay` seconds.
+
+    Exists so a crawl can be caught mid-flight. FakeFetcher returns instantly,
+    so by the time a test could cancel it the crawl has already finished and
+    there is nothing to unwind — which would make a cancellation test pass
+    while proving nothing.
+    """
+
+    def __init__(self, pages: dict[str, str], *, delay: float = 0.05) -> None:
+        self._pages = pages
+        self._delay = delay
+
+    async def get(self, url: str) -> Response:
+        await asyncio.sleep(self._delay)
+        body = self._pages.get(url)
+        return Response(
+            url=url,
+            final_url=url,
+            status=200 if body is not None else 404,
+            elapsed_ms=self._delay * 1000,
+            content_type="text/html" if body is not None else "",
+            text=body,
+        )
