@@ -577,22 +577,6 @@ cost listed is not finished.
 
 </details>
 
-<!-- ══════════════════════════════════════════════════════════════════════════
-     ADR entries below are yours to write. Add one per phase as you make the
-     call — Phase 03 alone should produce two or three.
-
-     An interviewer reads this section most closely and asks follow-ups about
-     it. The only sentences you can defend are the ones you wrote yourself.
-
-     Likely candidates as you build:
-       · queue + worker pool  vs  gather over discovered links
-       · TaskGroup            vs  bare gather
-       · query-string policy during URL normalisation
-       · whether the process pool earned its place
-       · JSONL                vs  a database
-       · Protocol             vs  ABC for Fetcher and Check
-     ══════════════════════════════════════════════════════════════════════ -->
-
 <details>
 <summary><code>ADR-001</code> · <b>Response is a local type, not httpx.Response</b></summary>
 
@@ -635,8 +619,11 @@ redirect one to the other.
 `rebind_seed`. The seed is validated at construction from what the user typed;
 if the first fetch redirects, `rebind_seed` re-points the host check at the
 seed's final URL, so every later comparison is made against the host the site
-actually canonicalises to. It refuses to run once any link has been added, so a
-crawl cannot change hosts partway through.
+actually canonicalises to. The crawler calls it on the seed's own response,
+before any of its links reach the frontier, and the final URL is marked as seen
+so the redirected home page is not fetched twice. It refuses once anything
+beyond the seed has been accepted, so a crawl cannot change hosts partway
+through.
 
 **Alternatives rejected** — Stripping a leading `www.` before comparing would
 fix the common case in one line, but it is a guess about site structure, and
@@ -697,6 +684,223 @@ touch `robots.py` and nothing else.
 
 </details>
 
+
+
+<details>
+<summary><code>ADR-004</code> · <b>The queue is the only list of pending work</b></summary>
+
+<br>
+
+**Context** — Phase 01 gave the frontier its own pending deque and a `pop()`,
+expecting Phase 03 to wrap it in an `asyncio.Queue`. The engine needs a queue
+that workers can await and that tracks completion — `queue.join()` is how a
+crawl knows it is finished — and a deque does neither.
+
+**Decision** — Replace the deque rather than wrap it. The frontier keeps only
+the decision: `add()` normalises, deduplicates, enforces host, depth and page
+budget, and returns its verdict with the accepted link, or `None`. The worker
+puts accepted links on the `asyncio.Queue`. `pop()`, the deque and `__len__`
+are gone.
+
+**Alternatives rejected** — Wrapping, with `frontier.pop()` feeding
+`queue.put()`. Two structures would hold the same pending set, and they
+disagree the moment one changes without the other: a link added but not yet
+popped is pending in one and absent from the other, while `join()` counts only
+the queue. Moving the queue into the frontier would have made it async and
+pulled an event loop into the one module whose value is that it needs none.
+
+**Trade-off accepted** — The frontier knows what it has accepted, not what is
+still waiting; the backlog belongs to the queue. The two stay consistent
+through one rule: every `ACCEPTED` verdict is enqueued exactly once, which
+`add()` enforces by returning the link only on acceptance.
+
+**Status** — accepted
+
+</details>
+
+
+<details>
+<summary><code>ADR-005</code> · <b>crawl() raises rather than return a report it cannot stand behind</b></summary>
+
+<br>
+
+**Context** — Two situations would let `crawl()` hand back a report that looks
+like a result and is not one. A seed the frontier refuses — `max_pages=0`, say
+— would produce an empty report, indistinguishable from a clean crawl of an
+empty site. A crawl cancelled halfway would produce counters for half a site,
+indistinguishable from a whole one.
+
+**Decision** — A refused seed raises `ValueError` before any worker starts.
+Cancellation propagates: the `TaskGroup` cancels every worker, `task_done()`
+still runs in each worker's `finally`, and `CancelledError` reaches the
+caller. No report is returned. Partial output becomes the job of Phase 05's
+streaming writer, which will already have written every record it received.
+
+**Alternatives rejected** — Catching `CancelledError` in `crawl()` and
+returning the counters so far. It swallows a cancellation the caller asked
+for, which breaks asyncio's contract, and the report it returns has no way to
+say it is partial — `completed=False` already means the page budget ran out.
+
+**Trade-off accepted** — Until Phase 05 an interrupted crawl produces nothing
+at all. The Phase 03 plan promised Ctrl-C with partial output and exit code
+`130`; that promise moved to Phase 05, where the writer can keep it.
+
+**Status** — accepted
+
+</details>
+
+
+<details>
+<summary><code>ADR-006</code> · <b>Transport failures are counted apart from findings</b></summary>
+
+<br>
+
+**Context** — The report had a single `errors` counter, and Phase 03 filled it
+with fetch failures — DNS, refused connections, timeouts — because those were
+the only errors that existed yet. Phase 04 adds checks whose findings carry a
+severity: a broken link is an error, a redirect chain a warning.
+
+**Decision** — `fetch_errors` counts transport failures. `errors` and
+`warnings` are reserved for check findings and stay at zero until Phase 04
+produces some.
+
+**Alternatives rejected** — One counter for both. A healthy site behind a flaky
+network and a broken site behind a fast one would report the same number, and
+the report could not answer the first question anyone asks of it: is the site
+broken, or was the way to it?
+
+**Trade-off accepted** — Two counters to read instead of one, and `errors=0` in
+every report until Phase 04 — which reads like a clean bill of health before
+any check exists to issue one.
+
+**Status** — accepted
+
+</details>
+
+
+<details>
+<summary><code>ADR-007</code> · <b>Workers hand the event loop back while they process links</b></summary>
+
+<br>
+
+**Context** — Crawling 150 pages of docs.python.org at two requests a second,
+with asyncio's debug mode reporting every callback over 20 ms, one worker step
+held the event loop for **732 ms**. A step is everything between two awaits:
+parsing a page, then offering every link on it to the frontier — about 500 a
+page on average, thousands on the largest. Profiled on a synthetic corpus of
+the same shape, `frontier.add` dominated the step rather than parsing, and
+almost all of that was `normalize_url`.
+
+A stall is not just slowness. While it lasts no timer fires, and the rate
+limiter's spacing depends on timers firing on time. Measured against
+`RateLimiter`, the worst-case gap between two requests to one host is the
+interval minus the stall — at two requests a second, a 732 ms stall sent two
+requests at once.
+
+**Decision** — The link loop yields with `asyncio.sleep(0)` every 100 links. On
+the same crawl the worst step fell to 194 ms and slow-callback warnings from 51
+to 21, every remaining one ending at the yield. The test counts a canary task's
+turns while a 1,000-link page is processed: 5 without the yield, at least 10
+with it. Nothing is timed, so it cannot flake.
+
+**Alternatives rejected** — Moving the link loop to a thread: `frontier.add`
+mutates the seen set and `asyncio.Queue` is not thread-safe; both are
+race-free only because they run on the loop's thread. Caching `normalize_url`:
+it cut link processing about 3.7× on the synthetic crawl, but that is
+throughput, not the stall's shape — it belongs to Phase 06, measured against
+this baseline. Moving parsing off the loop is Phase 04's decision. Measured
+with `asyncio.to_thread` on a 20,000-link page, the longest stall fell from
+about 250 ms to under 15 ms, but link loops then shared the GIL with the parse
+thread and ran slower, so the count of short stalls rose. Those numbers are
+Phase 04's starting point.
+
+**Trade-off accepted** — The remaining 194 ms is one `extract_links` call on the
+largest page, which a yield cannot split. At two requests a second it can
+narrow the spacing to about 300 ms but not collapse it; above about five a
+second, it could. Wall-clock time did not change and could not: 150 requests at
+two a second is 75 seconds, before and after. The fix bought correctness, not
+speed.
+
+**Status** — accepted
+
+</details>
+
+
+<details>
+<summary><code>ADR-008</code> · <b>An unparseable href is a verdict, not an exception</b></summary>
+
+<br>
+
+**Context** — `urljoin` raises `ValueError` on a malformed bracketed host such
+as `http://[::1`. `extract_links` called it unguarded, so one such link on any
+page ended the whole crawl: the worker raised, the `TaskGroup` cancelled the
+rest, and `crawl()` raised an `ExceptionGroup` with no report. The frontier
+already had a `MALFORMED` verdict for exactly this; the parser failed before
+the frontier saw the link. Fuzzed with 30,044 hostile hrefs, `urljoin` raised
+on 4,146 and `frontier.add` on none.
+
+**Decision** — `extract_links` returns an href it cannot resolve exactly as
+written. The frontier parses it with the same `urlsplit`, fails the same way,
+and counts it `MALFORMED` — all 4,146 of them do. `parsing.py` still imports
+nothing from the package, so it stays picklable for the Phase 04 process pool.
+
+**Alternatives rejected** — Dropping the href in the parser: the crawl
+survives, but the link vanishes from every count, and a link auditor that
+loses broken links without a trace is worse than one that crashes on them. A
+`try`/`except` around each page in the worker: also survives, but throws away
+every other link on that page, and would swallow the next real bug along with
+it. A malformed href is expected input, handled where URL policy lives.
+Resolving in the frontier instead: the parser is the only place that will ever
+see a document's `<base href>`, which resolution has to respect.
+
+**Trade-off accepted** — The parser's contract is now "absolute URLs, or the
+href as written when it cannot be resolved", and its correctness leans on the
+frontier rejecting whatever `urljoin` rejects. Both use `urllib`'s `urlsplit`,
+and a crawl-level test pins the behaviour.
+
+**Status** — accepted
+
+</details>
+
+
+<details>
+<summary><code>ADR-009</code> · <b>Every request is bounded in time and in what it downloads</b></summary>
+
+<br>
+
+**Context** — Two measurements of the real `HttpxFetcher` against a local
+server. With `timeout=1.0`, a server sending one byte every quarter second held
+a request open for 5.1 seconds, and the fetch succeeded: httpx applies its
+timeout to each network operation, not to the request. And a link to a 50 MB
+file came back with `text=None` after peaking at 105 MB of memory: the whole
+body was read before the content type was looked at. A link auditor follows
+links to installers, archives and videos, and each was being downloaded in
+full only to be thrown away.
+
+**Decision** — `asyncio.timeout()` covers the whole exchange — connect, headers
+and body — and expiry becomes a `FetchError`. It starts after the rate limiter,
+so time spent waiting for the host's turn is not charged to the server. The
+response is streamed and the headers decide what happens next: only
+`text/html` and `text/plain` are read — plain text because robots.txt travels
+through the same fetcher — and only up to `max_body_bytes`, 10 MiB by default.
+Anything else, and any text body over the cap, comes back with `text=None`
+without being downloaded, which is what `Response.text` already documented.
+
+**Alternatives rejected** — Tuning httpx's timeout: it is per operation by
+design, so no value of it bounds a slow drip. A `HEAD` request before each
+`GET` to learn the type and size: a second request per link doubles the load
+on the site, and servers answer `HEAD` inconsistently. Truncating an oversized
+page and parsing what arrived: links past the cut would vanish without a
+trace.
+
+**Trade-off accepted** — A text page over 10 MiB is checked by its status but
+not parsed, and the summary does not yet say how many were; per-page records
+arrive with Phase 05. For a skipped body, `elapsed_ms` is roughly the time to
+headers rather than to a download that never happened.
+
+**Status** — accepted
+
+</details>
 
 ---
 
