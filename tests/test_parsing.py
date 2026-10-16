@@ -95,6 +95,19 @@ def test_an_href_that_points_nowhere_is_skipped() -> None:
     assert links == []
 
 
+def test_an_href_urljoin_cannot_parse_comes_back_as_written() -> None:
+    """A malformed href is passed through raw, and the links after it survive.
+
+    urljoin raises ValueError on an unbalanced IPv6 bracket. Raising here would
+    end the crawl over one bad link; dropping the href would hide it. Returned
+    as written, it reaches the frontier, which counts it MALFORMED.
+    """
+
+    html_content = '<a href="http://[::1">x</a><a href="/after">y</a>'
+    links = extract_links(html_content, BASE)
+    assert links == ["http://[::1", "https://e.com/after"]
+
+
 @pytest.mark.parametrize(
     "html_content",
     [
