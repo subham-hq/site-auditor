@@ -129,6 +129,12 @@ async def _worker(
     rate limiter depends on those timers firing on time — a stall longer than
     its interval sends two requests to the same host at once.
 
+    The seed is the one link handled differently. If it redirected —
+    example.com to www.example.com, say — the frontier is rebound to where it
+    landed before any of its links are offered, or every link on the site
+    would be off-host (ADR-002). Nothing else can have been accepted by then:
+    every other link is discovered on the seed's page.
+
     A robots denial, a fetch failure and a non-HTML body are all ordinary
     outcomes, counted and stepped over. Nothing here should end the crawl.
     """
@@ -150,6 +156,8 @@ async def _worker(
                 stats.fetch_errors += 1
                 continue
 
+            if link.depth == 0 and response.final_url != link.url:
+                frontier.rebind_seed(response.final_url)
             hrefs = extract_links(response.text, response.final_url)
             for index, href in enumerate(hrefs):
                 if index % _LINKS_PER_YIELD == 0:
