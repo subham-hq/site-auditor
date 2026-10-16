@@ -1,6 +1,7 @@
 """The crawl engine. Imports protocols and models, nothing concrete."""
 
 import asyncio
+import heapq
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -17,6 +18,10 @@ from siteaudit.protocols import Fetcher, RobotsChecker
 # so a chunk holds the loop for a few milliseconds rather than a whole page's
 # worth. See ADR-007.
 _LINKS_PER_YIELD = 100
+
+# How many of the slowest pages the report names. The engine keeps exactly this
+# many timings in a heap, however many pages it crawls.
+_SLOWEST_KEPT = 10
 
 
 @dataclass(slots=True)
@@ -35,7 +40,7 @@ class _Stats:
     verdicts: Counter[Verdict] = field(default_factory=Counter)
     skipped_robots: int = 0
     fetch_errors: int = 0
-    slowest: list[tuple[str, float]] = field(default_factory=list)
+    slowest: list[tuple[float, str]] = field(default_factory=list)  # min-heap of (ms, url)
 
 
 async def crawl(
@@ -138,7 +143,7 @@ async def _worker(
                 response = await fetcher.get(link.url)
                 stats.pages_crawled += 1
                 stats.status_counts[response.status] += 1
-                stats.slowest.append((response.final_url, response.elapsed_ms))
+                _record_timing(stats.slowest, response.final_url, response.elapsed_ms)
                 if response.text is None:
                     continue
             except FetchError:
@@ -190,5 +195,21 @@ def _build_report(
         skipped_robots=stats.skipped_robots,
         skipped_non_http=stats.verdicts[Verdict.NON_HTTP],
         completed=completed,
-        slowest=tuple(sorted(stats.slowest, key=lambda row: row[1], reverse=True)[:10]),
+        slowest=tuple((url, ms) for ms, url in sorted(stats.slowest, reverse=True)),
     )
+
+
+def _record_timing(slowest: list[tuple[float, str]], url: str, elapsed_ms: float) -> None:
+    """Keep the _SLOWEST_KEPT slowest pages seen so far, in a min-heap.
+
+    The fastest of the slow sits at the root, so each new timing either
+    displaces it or is discarded on the spot. Appending every timing and sorting
+    at the end would hold one entry per page for the whole crawl — the growing
+    list AuditReport's bounded-memory rule exists to prevent.
+    """
+
+    entry = (elapsed_ms, url)
+    if len(slowest) < _SLOWEST_KEPT:
+        heapq.heappush(slowest, entry)
+    else:
+        heapq.heappushpop(slowest, entry)
