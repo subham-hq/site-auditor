@@ -8,16 +8,13 @@
 
 <br>
 
+[![CI](https://github.com/subham-hq/site-auditor/actions/workflows/ci.yml/badge.svg)](https://github.com/subham-hq/site-auditor/actions/workflows/ci.yml)
 ![status](https://img.shields.io/badge/status-in%20development-F5A623?style=flat-square)
-![phase](https://img.shields.io/badge/phase-03%20%2F%2008-4A5568?style=flat-square)
+![phase](https://img.shields.io/badge/phase-04%20%2F%2008-4A5568?style=flat-square)
 ![python](https://img.shields.io/badge/python-3.12+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![mypy](https://img.shields.io/badge/mypy-strict-0B7A87?style=flat-square)
 ![ruff](https://img.shields.io/badge/lint-ruff-D7FF64?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-718096?style=flat-square)
-
-<!-- Swap in once CI is green (Phase 00):
-[![CI](https://github.com/subham-hq/site-auditor/actions/workflows/ci.yml/badge.svg)](https://github.com/subham-hq/site-auditor/actions/workflows/ci.yml)
--->
 
 **[Overview](#overview) · [Status](#status) · [Architecture](#architecture) · [Usage](#usage) · [Performance](#performance) · [Decisions](#design-decisions) · [Build log](#build-log)**
 
@@ -26,7 +23,7 @@
 ---
 
 > [!WARNING]
-> **Not usable yet — this is Phase 03 of 08.**
+> **Not usable yet — Phases 00 to 03 of 08 are done; the command line arrives in Phase 05.**
 > The repository is public from the first commit so the design and the build sequence are
 > visible, not because there is anything to install. Nothing in this document describes
 > working software except where the [Status](#status) table says so.
@@ -117,17 +114,19 @@ flat, and a benchmark honest enough to report the parts that lost.
 ## Status
 
 ```
-Phase ▰▰▰▱▱▱▱▱ 3 / 8 complete
+Phase ▰▰▰▰▱▱▱▱ 4 / 8 complete
 ```
 
-**What works today:** nothing. The repository is scaffolding and design.
+**What works today:** the crawl engine, driven from Python. `crawl()` takes a seed URL, a
+fetcher and a robots policy and returns an `AuditReport`; it has crawled 150 pages of
+docs.python.org under asyncio's debug mode. There is no command line until Phase 05.
 
 | # | Phase | Delivers | Status |
 |:---:|---|---|:---:|
 | 00 | Scaffold | packaging, `mypy --strict`, `ruff`, green CI | ✅ |
 | 01 | Core model | models, protocols, URL normalisation, frontier | ✅ |
 | 02 | Network layer | async fetcher, retry, rate limit, robots | ✅ |
-| 03 | Crawl engine | queue, worker pool, cancellation | 🚧 |
+| 03 | Crawl engine | queue, worker pool, cancellation | ✅ |
 | 04 | Parsing | HTML off the event loop, pluggable checks | ⬜ |
 | 05 | Interface | streaming JSONL, console summary, CLI | ⬜ |
 | 06 | Benchmark | four execution models over a fixed corpus | ⬜ |
@@ -196,14 +195,21 @@ the retry test uses a fetcher that fails twice then succeeds — no mocking libr
 
 The heart of the project. Budget the most time here and expect one rewrite.
 
-- [ ] `asyncio.Queue` frontier, N workers inside a `TaskGroup`
-- [ ] `Semaphore` in-flight bound; `asyncio.timeout()` per request
-- [ ] Correct termination: `await queue.join()` then cancel; `task_done()` in `finally`
-- [ ] Graceful cancellation on `KeyboardInterrupt`, partial results flushed
-- [ ] Developed under `debug=True`, every slow-callback warning treated as a defect
+- [x] `asyncio.Queue` of pending work, N workers inside a `TaskGroup` — the frontier
+      decides, the queue distributes ([ADR-004](#design-decisions))
+- [x] `Semaphore` in-flight bound; `asyncio.timeout()` per request, covering the whole
+      exchange ([ADR-009](#design-decisions))
+- [x] Correct termination: `await queue.join()` then cancel; `task_done()` in `finally`
+- [x] Cancellation unwinds every worker and leaves no task behind; a refused seed raises
+      instead of returning an empty report ([ADR-005](#design-decisions))
+- [x] Developed under `debug=True` against a real site, every slow-callback warning traced
+      to its cause ([ADR-007](#design-decisions))
+- [x] A malformed link is a verdict, never a crash ([ADR-008](#design-decisions)); a seed
+      that redirects is followed to its final host ([ADR-002](#design-decisions))
 
-**Done when** a 50-page crawl runs entirely off `FakeFetcher`, Ctrl-C exits clean with
-partial output and code `130`, and a cancellation test passes in CI.
+**Done when** a 50-page crawl runs entirely off `FakeFetcher`, a cancelled crawl unwinds
+every worker without hanging, and both are proven by tests in CI. Ctrl-C with partial output
+and exit code `130` moved to Phase 05, where the streaming writer makes it possible.
 
 </details>
 
@@ -212,7 +218,9 @@ partial output and code `130`, and a cancellation test passes in CI.
 
 <br>
 
-The CPU half, where the GIL stops being theory.
+The CPU half, where the GIL stops being theory. It starts from a measured problem: on
+docs.python.org one page's parse still holds the event loop for about 194 ms
+([ADR-007](#design-decisions)).
 
 - [ ] `parsing.py` — pure, picklable, dependency-free functions
 - [ ] `ProcessPoolExecutor` via `run_in_executor`, size configurable
@@ -235,6 +243,8 @@ Usable by someone who is not me, including a machine.
 - [ ] Console summary: counts by status class, slowest pages, broken links
 - [ ] `cli.py` as composition root — parse, construct, inject, run
 - [ ] Exit codes wired through
+- [ ] Ctrl-C exits with code `130` after flushing partial results — moved here from Phase 03
+      ([ADR-005](#design-decisions))
 
 **Done when** it runs from a clean clone and memory stays flat across a 500-page crawl —
 measured, not assumed.
@@ -922,22 +932,10 @@ Newest first. One entry per phase — what shipped, and what it cost.
 
 | Date | Phase | Shipped | Notes |
 |---|:---:|---|---|
+| 2026-10-16 | 03 | Crawl engine — queue, workers, cancellation | A real-site debug run found a 732 ms loop stall; one malformed href could end any crawl |
 | 2026-08-19 | 02 | Fetcher, retry, rate limit, robots | Stdlib robots parser silently allowed every wildcard rule; swapped to protego |
 | 2026-08-03 | 01 | Models, protocols, urls, frontier   | is_same_host let mailto: through — None == None |
 | 2026-08-03 | 00 | Scaffold, toolchain, CI            | pyproject missing [build-system]; package never installed |
-
-<details>
-<summary><b>Entry template</b></summary>
-
-<br>
-
-```
-| 2026-08-14 | 03 | Crawl engine — queue, workers, cancellation | Rewrote termination twice; queue.join() vs awaiting workers |
-```
-
-Keep the notes column honest. "Rewrote it twice" is more interesting than "done".
-
-</details>
 
 <br>
 
