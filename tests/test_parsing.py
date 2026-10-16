@@ -70,6 +70,23 @@ def test_an_absolute_href_wins_outright() -> None:
     assert links == ["https://other.com/a"]
 
 
+def test_fragment_and_query_only_hrefs_attach_to_the_page() -> None:
+    """A fragment-only or query-only href is relative to the page itself.
+
+    Both are everywhere on documentation sites — every heading link is a
+    fragment. Resolved against the page, a fragment-only href normalises back
+    to the page's own URL, which is how the frontier counts it as a duplicate
+    rather than a new page.
+    """
+
+    html_content = '<a href="#section">x</a><a href="?page=2">x</a>'
+    links = extract_links(html_content, BASE)
+    assert links == [
+        "https://e.com/docs/guide/intro.html#section",
+        "https://e.com/docs/guide/intro.html?page=2",
+    ]
+
+
 def test_non_http_schemes_pass_through() -> None:
     """mailto: comes back unchanged. This function does not filter.
 
