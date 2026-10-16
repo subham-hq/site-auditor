@@ -812,8 +812,9 @@ about 250 ms to under 15 ms, but link loops then shared the GIL with the parse
 thread and ran slower, so the count of short stalls rose. Those numbers are
 Phase 04's starting point.
 
-**Trade-off accepted** — The remaining 194 ms is one `extract_links` call on the
-largest page, which a yield cannot split. At two requests a second it can
+**Trade-off accepted** — The remaining 194 ms is parsing: a chunk of 100 links
+takes a few milliseconds, so the one long step left is a single `extract_links`
+call, which a yield cannot split. At two requests a second it can
 narrow the spacing to about 300 ms but not collapse it; above about five a
 second, it could. Wall-clock time did not change and could not: 150 requests at
 two a second is 75 seconds, before and after. The fix bought correctness, not
@@ -904,13 +905,12 @@ headers rather than to a download that never happened.
 
 ## Why this exists
 
-<!-- TODO(you) — 2-3 sentences, write this now, before Phase 00.
-
-     What problem made you want this? Did you look at Screaming Frog, linkchecker or
-     lychee and find them unsuitable, or is the honest answer that you wanted to build
-     the concurrency yourself? Both are respectable. A vague answer is not. -->
-
-> 🔒 *To be written.*
+Link checkers already exist. This one is built for what a link checker forces you to get
+right: concurrency that stays bounded, politeness toward servers you do not own,
+cancellation that never hangs, and CPU-bound parsing competing with network I/O for a single
+thread. Each of those is a claim in this README, and each claim is meant to trace to a test
+or, from Phase 06, a benchmark. Where one did not at first, the build log and the decision
+log say so.
 
 <br>
 
@@ -945,13 +945,25 @@ Keep the notes column honest. "Rewrote it twice" is more interesting than "done"
 
 ## Limitations
 
-<!-- TODO(you) — written at the end, after Phase 07.
+Known today, each either scheduled or deliberate:
 
-     Every honest project has a known weakness. Naming yours precisely, and saying why
-     you shipped anyway, reads as judgment rather than as an admission. This is the
-     answer to "what is the worst bug still in this codebase?" -->
-
-> 🔒 *To be written after Phase 07.*
+- **No command line yet.** `crawl()` is driven from Python. The CLI, exit codes and Ctrl-C
+  handling arrive in Phase 05.
+- **Parsing runs on the event loop.** On docs.python.org one page's parse still holds the
+  loop for about 194 ms. Moving parsing off the loop is Phase 04 ([ADR-007](#design-decisions)).
+- **One host per crawl.** Subdomains are separate hosts ([ADR-002](#design-decisions)). A
+  seed that redirects is followed to its final host; links to other subdomains are counted
+  as off-host, not crawled.
+- **Off-host links are counted, not checked,** and counted per occurrence rather than per
+  distinct URL. Checking them is Phase 04.
+- **A page reachable at two URLs can be fetched twice.** Deduplication works on the URL
+  requested; apart from the seed, a redirect's destination is not folded back into it.
+- **`<base href>` is ignored** when relative links are resolved.
+- **A text page over 10 MiB is checked but not parsed,** and the summary does not yet say
+  how many were ([ADR-009](#design-decisions)).
+- **`Retry-After` is not honoured.** A 429 is retried on the fetcher's own backoff.
+- **Concurrent first requests to a new host each fetch robots.txt** before one has cached
+  it. Wasteful rather than wrong, and bounded by the concurrency limit.
 
 <br>
 
