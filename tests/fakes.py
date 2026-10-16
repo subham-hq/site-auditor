@@ -161,6 +161,23 @@ class TimedFetcher:
         return replace(response, elapsed_ms=self._elapsed_ms[url])
 
 
+class RedirectingFetcher:
+    """A FakeFetcher where some URLs redirect before answering.
+
+    `redirects` maps a requested URL to where the server sends it. The page
+    served is the one at the final URL, and final_url reports it — which is
+    all the crawler ever sees of a redirect.
+    """
+
+    def __init__(self, pages: dict[str, str], *, redirects: dict[str, str]) -> None:
+        self._inner = FakeFetcher(pages)
+        self._redirects = redirects
+
+    async def get(self, url: str) -> Response:
+        response = await self._inner.get(self._redirects.get(url, url))
+        return replace(response, url=url)
+
+
 class SlowFetcher:
     """A Fetcher where every request takes `delay` seconds.
 

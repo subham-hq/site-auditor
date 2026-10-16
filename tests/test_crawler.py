@@ -17,7 +17,14 @@ import pytest
 from siteaudit.crawler import crawl
 from siteaudit.errors import FetchError
 from siteaudit.models import Response
-from tests.fakes import DenyingRobots, FakeFetcher, FakeRobots, SlowFetcher, TimedFetcher
+from tests.fakes import (
+    DenyingRobots,
+    FakeFetcher,
+    FakeRobots,
+    RedirectingFetcher,
+    SlowFetcher,
+    TimedFetcher,
+)
 
 TIMEOUT = 5.0
 SEED = "https://e.com/0"
@@ -271,6 +278,32 @@ async def test_a_page_linked_from_many_others_is_fetched_once() -> None:
 
     assert report.pages_crawled == 5
     assert report.completed is True
+
+
+async def test_a_seed_that_redirects_to_www_is_followed() -> None:
+    """A bare-domain seed that redirects to www crawls the www site.
+
+    Most sites answer on one canonical host and redirect the other. Without
+    rebinding, every link on the redirected site is off-host and the crawl ends
+    after one page, looking healthy. The home page's link back to itself is a
+    duplicate of the seed, not a fourth page.
+    """
+
+    pages = {
+        "https://www.e.com/0": (
+            '<a href="/1">one</a> <a href="https://www.e.com/2">two</a>'
+            ' <a href="https://www.e.com/0">home</a>'
+        ),
+        "https://www.e.com/1": "",
+        "https://www.e.com/2": "",
+    }
+    fetcher = RedirectingFetcher(pages, redirects={SEED: "https://www.e.com/0"})
+    report = await asyncio.wait_for(
+        crawl(SEED, fetcher=fetcher, robots=FakeRobots()), timeout=TIMEOUT
+    )
+
+    assert report.pages_crawled == 3
+    assert report.skipped_off_host == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
