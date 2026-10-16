@@ -22,6 +22,9 @@ class HttpxFetcher:
     httpx.HTTPError into FetchError, so crawler.py never learns which HTTP
     client is underneath. A 404 is not an error here — it is a successful
     fetch that returned 404, and reporting it is the point of the tool.
+
+    `transport` is the seam the tests use: an httpx.MockTransport serves canned
+    responses with no sockets. Left as None, httpx opens real connections.
     """
 
     def __init__(
@@ -31,10 +34,12 @@ class HttpxFetcher:
         timeout: float,
         rate: float,
         retry_policy: RetryPolicy | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._client: httpx.AsyncClient | None = None
         self._max_concurrency = max_concurrency
         self._timeout = timeout
+        self._transport = transport
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._limiter = RateLimiter(rate=rate)
         self._retry_policy = retry_policy or RetryPolicy()
@@ -45,6 +50,7 @@ class HttpxFetcher:
             timeout=self._timeout,
             follow_redirects=True,
             limits=httpx.Limits(max_connections=self._max_concurrency),
+            transport=self._transport,
         )
         return self
 
