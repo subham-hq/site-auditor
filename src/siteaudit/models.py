@@ -77,7 +77,7 @@ class CheckResult:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AuditReport:
-    """Summary of one completed or interrupted crawl.
+    """Summary of one crawl, whether it finished or stopped at its page budget.
 
     Counters only. It never holds Page objects, and adding a `pages` field
     would undo the bounded-memory property the whole design rests on.
@@ -105,7 +105,7 @@ class AuditReport:
     skipped_robots: int
     skipped_non_http: int
 
-    completed: bool  # False if budget hit or canceled
+    completed: bool  # False when the page budget stopped the crawl early
     slowest: Sequence[tuple[str, float]]  # bounded top-N (url, ms)
 
 
