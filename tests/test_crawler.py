@@ -573,3 +573,40 @@ async def test_a_cancelled_crawl_leaves_no_orphaned_workers() -> None:
 
     await asyncio.sleep(0)
     assert len(asyncio.all_tasks()) == before
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The event loop
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def test_a_large_page_does_not_starve_the_event_loop() -> None:
+    """The link loop hands the loop back while it works, so other tasks keep running.
+
+    A canary task counts its own turns while the crawl processes one page of
+    1,000 off-host links. Without the yield the whole page is a single step and
+    the canary barely moves; with it, the canary gets a turn every 100 links.
+    Counting turns instead of timing anything keeps this deterministic on any
+    machine, however loaded.
+    """
+
+    page = "".join(f'<a href="https://other{i}.com/">x</a>' for i in range(1000))
+    turns = 0
+    done = False
+
+    async def canary() -> None:
+        nonlocal turns
+        while not done:
+            turns += 1
+            await asyncio.sleep(0)
+
+    canary_task = asyncio.create_task(canary())
+    await asyncio.sleep(0)
+    turns = 0
+    await crawl(
+        SEED, fetcher=FakeFetcher({SEED: page}), robots=FakeRobots(), max_pages=1, workers=1
+    )
+    done = True
+    await canary_task
+
+    assert turns >= 10, f"canary got {turns} turns while 1,000 links were processed"
