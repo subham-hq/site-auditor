@@ -27,15 +27,16 @@ def _validated_seed(url: str) -> str:
 
 
 class Frontier:
-    """The crawl's work queue and its gatekeeper.
+    """The crawl's gatekeeper: decides which links are allowed in.
 
-    Holds URLs waiting to be fetched and decides which ones are allowed in.
-    Breadth-first: links come out in the order they were accepted, so pages
-    close to the seed are crawled before deeper ones.
+    Every link a worker discovers is offered here and gets a Verdict back. The
+    frontier remembers what it has accepted and enforces host, depth and page
+    budget. It holds no pending work: accepted links go into the crawler's
+    asyncio.Queue, which hands them out in the order they were accepted, so
+    pages close to the seed are crawled before deeper ones (ADR-004).
 
     Pure and synchronous by design. The decision logic is where the bugs live,
-    so it is testable with no event loop and no network; Phase 03 wraps this
-    in an asyncio.Queue rather than rewriting it.
+    so it is testable with no event loop and no network.
 
     The seed URL is normalized and validated once here, which means every
     method afterward can assume it is a well-formed http or https URL.
@@ -48,7 +49,7 @@ class Frontier:
         self._max_depth = max_depth
         self._max_pages = max_pages
 
-    def rebind_seed(self, final_url: str) -> None:  # new — here
+    def rebind_seed(self, final_url: str) -> None:
         """Re-point the host check at the seed's final URL after redirects.
 
         The seed is validated at construction from what the user typed, but a
