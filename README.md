@@ -283,29 +283,21 @@ The phase most people skip, and the one that gets read.
 
 ```mermaid
 flowchart LR
-    A(["Seed URL"]) --> F1
+    A(["Seed URL"]) --> FR
 
-    subgraph FR["Frontier"]
-        direction TB
-        F1["Dedup set"]
-        F2["asyncio.Queue"]
-        F1 --> F2
-    end
-
-    F2 --> W
+    FR["Frontier<br/>normalise, dedup<br/>same host, depth, page budget"]
+    FR -->|"accepted links only"| Q["asyncio.Queue<br/>pending work"]
+    Q --> W
 
     subgraph WP["Worker pool - asyncio.TaskGroup"]
-        W["Worker x N<br/>Semaphore bounded<br/>per-host rate limit"]
+        W["Worker x N<br/>robots.txt check<br/>yields every 100 links"]
     end
 
-    W --> FE["Fetcher<br/>one AsyncClient for the run"]
+    W --> FE["Fetcher<br/>one AsyncClient, Semaphore bounded<br/>per-host rate limit, total deadline"]
     FE --> PP["Process pool<br/>HTML parsing off the loop"]
     PP --> CH["Checks<br/>links, metadata"]
     CH --> WR[("report.jsonl<br/>streamed")]
-    CH -.->|"new in-host links"| F1
-
-    BG{{"Budget guard<br/>depth, page cap, robots, same-host"}}
-    BG -.-> F1
+    PP -.->|"every link found"| FR
 ```
 
 ### Lifecycle of a single page
@@ -313,23 +305,26 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     autonumber
-    participant F as Frontier
+    participant Q as Queue
     participant W as Worker
-    participant R as RateLimiter
     participant H as Fetcher
+    participant R as RateLimiter
     participant P as ProcessPool
+    participant F as Frontier
     participant O as Writer
 
-    F->>W: url via await queue.get
-    W->>R: acquire host token
-    R-->>W: granted
-    W->>H: GET inside asyncio.timeout
-    H-->>W: response, final_url, elapsed
+    Q->>W: link via await queue.get
+    W->>H: get url, once robots.txt allows it
+    H->>R: wait for the host's next slot
+    R-->>H: slot
+    H-->>W: status, final_url, elapsed, body if text
     W->>P: run_in_executor parse html
     P-->>W: links plus metadata
     W->>O: result record
-    W->>F: enqueue new in-host links
-    W->>F: task_done in finally
+    W->>F: offer every link found
+    F-->>W: verdict, and the link if accepted
+    W->>Q: put accepted links
+    W->>Q: task_done in finally
 ```
 
 > [!IMPORTANT]
@@ -344,9 +339,11 @@ sequenceDiagram
 
 <br>
 
-`crawler.py` imports `protocols.py` and nothing else from this package — not the fetcher,
-not the checks, not the report writer. `cli.py` is the only module permitted to construct
-real implementations and inject them.
+`crawler.py` imports no concrete implementation from this package — not the fetcher, not the
+robots policy, not the checks, not the report writer. It reaches each of them through
+`protocols.py`; everything else it imports (`models`, `frontier`, `parsing`, `errors`) is
+pure and does no I/O. `cli.py` is the only module permitted to construct real
+implementations and inject them.
 
 ```
         protocols.py
@@ -377,21 +374,21 @@ If `crawler.py` grows a concrete import, that is a design regression, not a conv
 site-auditor/
 ├── src/siteaudit/
 │   ├── cli.py          composition root — the only place concretes are wired
-│   ├── models.py       Page, Link, CheckResult, AuditReport
-│   ├── protocols.py    Fetcher, Check — the abstraction seam
+│   ├── models.py       Page, Link, Response, CheckResult, AuditReport
+│   ├── protocols.py    Fetcher, RobotsChecker, Check — the seams
 │   ├── errors.py       AuditError hierarchy
 │   ├── urls.py         normalisation, same-host predicate (pure, sync)
 │   ├── frontier.py     dedup set, depth tracking, budget guard
 │   ├── robots.py       robots.txt fetch and verdict
-│   ├── ratelimit.py    per-host token bucket
-│   ├── decorators.py   @retry with backoff and jitter, @timed
-│   ├── fetcher.py      httpx.AsyncClient wrapper, async context manager
+│   ├── ratelimit.py    per-host even spacing
+│   ├── decorators.py   @retry with backoff and jitter
+│   ├── fetcher.py      httpx.AsyncClient wrapper: deadline, text-only reads
 │   ├── crawler.py      the engine — queue, workers, TaskGroup
 │   ├── parsing.py      pure CPU functions, picklable, no package imports
 │   ├── checks/
 │   │   ├── links.py    broken links, redirect chains, mixed content
 │   │   └── meta.py     title, description, canonical, h1 count
-│   └── report.py       async JSONL writer, console summary
+│   └── reports.py      async JSONL writer, console summary
 ├── benchmarks/
 │   ├── corpus/         fixed local pages, served over loopback
 │   ├── bench.py        four execution models, one workload
@@ -400,6 +397,7 @@ site-auditor/
     ├── fakes.py        FakeFetcher — no mocking library
     ├── test_urls.py    the hardest-tested module in the repo
     ├── test_crawler.py including a cancellation test
+    ├── test_fetcher.py the real fetcher, through httpx.MockTransport
     └── ...
 ```
 
@@ -541,7 +539,7 @@ cd site-auditor
 uv sync
 
 uv run pytest                 # tests
-uv run mypy --strict src/     # type check
+uv run mypy --strict src/ tests/   # type check
 uv run ruff check .           # lint
 uv run ruff format .          # format
 
