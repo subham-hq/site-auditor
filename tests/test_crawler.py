@@ -77,7 +77,7 @@ async def test_a_fifty_page_crawl_terminates() -> None:
     )
 
     assert report.pages_crawled == 50
-    assert report.links_checked == 49
+    assert report.links_found == 49
     assert report.fetch_errors == 0
     assert report.skipped_robots == 0
     assert report.skipped_off_host == 0
@@ -134,7 +134,7 @@ async def test_a_single_page_with_no_links_terminates() -> None:
 
     assert report.pages_crawled == 1
     assert report.completed is True
-    assert report.links_checked == 0
+    assert report.links_found == 0
     assert report.fetch_errors == 0
     assert report.skipped_robots == 0
 
@@ -174,7 +174,7 @@ async def test_depth_limit_is_respected() -> None:
 
     assert report.pages_crawled == 4
     assert report.completed is True
-    assert report.links_checked == 4
+    assert report.links_found == 4
 
 
 async def test_page_budget_caps_the_crawl() -> None:
@@ -202,7 +202,7 @@ async def test_page_budget_caps_the_crawl() -> None:
     )
 
     assert report.pages_crawled == 3
-    assert report.links_checked == 3
+    assert report.links_found == 3
     assert report.completed is False
 
 
@@ -234,7 +234,7 @@ async def test_off_host_links_are_not_followed() -> None:
 
     assert report.pages_crawled == 2
     assert report.skipped_off_host == 1
-    assert report.links_checked == 2
+    assert report.links_found == 2
     assert report.completed is True
 
 
@@ -369,7 +369,7 @@ async def test_robots_denial_is_counted_and_skipped() -> None:
 
     That ordering has a consequence worth knowing: the denied URL still
     consumed a slot of max_pages, because the frontier counted it as accepted
-    before anyone asked robots. links_checked is 2 for the same reason — both
+    before anyone asked robots. links_found is 2 for the same reason — both
     links were offered and both came back ACCEPTED.
     """
 
@@ -393,7 +393,7 @@ async def test_robots_denial_is_counted_and_skipped() -> None:
 
     assert report.pages_crawled == 2
     assert report.skipped_robots == 1
-    assert report.links_checked == 2
+    assert report.links_found == 2
     assert report.status_counts == {200: 2}
     assert report.completed is True
 
@@ -403,7 +403,7 @@ async def test_a_malformed_href_does_not_end_the_crawl() -> None:
 
     urljoin raises ValueError on a malformed bracketed host. Before the parser
     passed such hrefs through, this one link ended the whole crawl with an
-    ExceptionGroup and no report. links_checked is 3 because the broken href is
+    ExceptionGroup and no report. links_found is 3 because the broken href is
     still offered to the frontier — it becomes a MALFORMED verdict instead of
     disappearing.
     """
@@ -417,7 +417,7 @@ async def test_a_malformed_href_does_not_end_the_crawl() -> None:
         crawl(SEED, fetcher=FakeFetcher(pages), robots=FakeRobots()), timeout=TIMEOUT
     )
     assert report.pages_crawled == 3
-    assert report.links_checked == 3
+    assert report.links_found == 3
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -487,7 +487,7 @@ async def test_status_counts_reflect_what_was_fetched() -> None:
 
     assert report.status_counts == {200: 3, 404: 1}
     assert sum(report.status_counts.values()) == report.pages_crawled
-    assert report.links_checked == 3
+    assert report.links_found == 3
     assert report.completed is True
 
 

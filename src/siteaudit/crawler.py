@@ -35,7 +35,7 @@ class _Stats:
     """
 
     pages_crawled: int = 0
-    links_checked: int = 0
+    links_found: int = 0
     status_counts: Counter[int] = field(default_factory=Counter)
     verdicts: Counter[Verdict] = field(default_factory=Counter)
     skipped_robots: int = 0
@@ -156,7 +156,7 @@ async def _worker(
                     await asyncio.sleep(0)
                 candidate_link = Link(url=href, source_url=response.final_url, depth=link.depth + 1)
                 verdict, accepted_link = frontier.add(candidate_link)
-                stats.links_checked += 1
+                stats.links_found += 1
                 stats.verdicts[verdict] += 1
                 if accepted_link is not None:
                     queue.put_nowait(accepted_link)
@@ -186,7 +186,7 @@ def _build_report(
         started_at=start_time,
         finished_at=end_time,
         pages_crawled=stats.pages_crawled,
-        links_checked=stats.links_checked,
+        links_found=stats.links_found,
         status_counts=MappingProxyType(dict(stats.status_counts)),
         errors=0,
         warnings=0,

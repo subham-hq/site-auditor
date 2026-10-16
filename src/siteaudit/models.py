@@ -94,7 +94,7 @@ class AuditReport:
     finished_at: datetime
 
     pages_crawled: int
-    links_checked: int
+    links_found: int  # every href offered to the frontier, duplicates and rejects included
     status_counts: Mapping[int, int]  # {200: 412, 301: 6, 404: 3}
 
     errors: int
