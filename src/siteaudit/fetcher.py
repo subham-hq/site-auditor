@@ -1,4 +1,5 @@
 import asyncio
+import time
 from types import TracebackType
 from urllib.parse import urlsplit
 
@@ -9,6 +10,14 @@ from siteaudit.errors import FetchError
 from siteaudit.models import Response
 from siteaudit.ratelimit import RateLimiter
 from siteaudit.urls import normalize_url
+
+# Bodies worth reading: HTML to parse, and plain text because robots.txt
+# travels through this same fetcher.
+TEXT_CONTENT_TYPES = ("text/html", "text/plain")
+
+# An order of magnitude above any ordinary page, and small enough that twenty
+# concurrent fetches stay within a few hundred megabytes.
+DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
 
 
 class HttpxFetcher:
@@ -35,11 +44,15 @@ class HttpxFetcher:
         rate: float,
         retry_policy: RetryPolicy | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
     ) -> None:
+        if max_body_bytes <= 0:
+            raise ValueError(f"max_body_bytes must be positive, got {max_body_bytes}")
         self._client: httpx.AsyncClient | None = None
         self._max_concurrency = max_concurrency
         self._timeout = timeout
         self._transport = transport
+        self._max_body_bytes = max_body_bytes
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._limiter = RateLimiter(rate=rate)
         self._retry_policy = retry_policy or RetryPolicy()
@@ -86,25 +99,51 @@ class HttpxFetcher:
         async with self._semaphore:
             host = urlsplit(url).hostname or ""
             await self._limiter.acquire(host)
+            started = time.perf_counter()
             try:
-                async with asyncio.timeout(self._timeout):
-                    response = await self._client.get(url)
+                async with (
+                    asyncio.timeout(self._timeout),
+                    self._client.stream("GET", url) as response,
+                ):
+                    content_type = response.headers.get("content-type", "")
+                    text = await self._read_text(response, content_type)
             except TimeoutError as exc:
                 raise FetchError(f"no full response within {self._timeout}s: {url}") from exc
             except httpx.HTTPError as exc:
                 raise FetchError(f"could not fetch {url}: {exc}") from exc
+            elapsed_ms = (time.perf_counter() - started) * 1000
 
-            content_type = response.headers.get("content-type", "")
             return Response(
                 url=url,
                 final_url=normalize_url(str(response.url)),
                 status=response.status_code,
-                elapsed_ms=response.elapsed.total_seconds() * 1000,
+                elapsed_ms=elapsed_ms,
                 content_type=content_type,
-                text=response.text
-                if content_type.startswith(("text/html", "text/plain"))
-                else None,
+                text=text,
             )
+
+    async def _read_text(self, response: httpx.Response, content_type: str) -> str | None:
+        """The body as text when it is worth parsing, or None without reading it.
+
+        Anything that is not HTML or plain text is closed unread: a link to an
+        installer is checked by its status, not downloaded. A text body larger
+        than max_body_bytes is abandoned the moment it crosses the line and
+        comes back as None, like a binary. A declared Content-Length over the
+        cap is believed up front, so an honest server costs nothing at all; the
+        running count catches the ones that don't declare, or that lie.
+        """
+
+        if not content_type.lower().startswith(TEXT_CONTENT_TYPES):
+            return None
+        declared = response.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > self._max_body_bytes:
+            return None
+        body = bytearray()
+        async for chunk in response.aiter_bytes():
+            body += chunk
+            if len(body) > self._max_body_bytes:
+                return None
+        return body.decode(response.encoding or "utf-8", errors="replace")
 
     async def get(self, url: str) -> Response:
         """Fetch one URL and return what came back, whatever the status.
@@ -124,10 +163,12 @@ class HttpxFetcher:
         the `url` you passed in; comparing the two is how a redirect is
         detected downstream.
 
-        The body is read for text/html and text/plain — the second because
-        robots.txt is plain text and travels through this same fetcher. A PDF
-        or an image comes back with `text=None` rather than a binary blob
-        decoded into memory: the link is still checked, it just isn't parsed.
+        The response is streamed, and the headers decide whether the body is
+        read at all. Only text/html and text/plain are read, up to
+        max_body_bytes; anything else — a PDF, an image, an installer — comes
+        back with `text=None` without being downloaded. The link is still
+        checked by its status; it just isn't parsed. For a skipped body,
+        `elapsed_ms` is therefore close to the time to headers.
         """
 
         return await self._get(url)
