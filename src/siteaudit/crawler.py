@@ -12,6 +12,12 @@ from siteaudit.models import AuditReport, Link
 from siteaudit.parsing import extract_links
 from siteaudit.protocols import Fetcher, RobotsChecker
 
+# How many links a worker processes before handing the event loop back. Each
+# frontier.add costs tens of microseconds, almost all of it in normalize_url,
+# so a chunk holds the loop for a few milliseconds rather than a whole page's
+# worth. See ADR-007.
+_LINKS_PER_YIELD = 100
+
 
 @dataclass(slots=True)
 class _Stats:
@@ -112,6 +118,12 @@ async def _worker(
     queue. Only an accepted link comes back non-None, and that is what gets
     enqueued — the frontier decides, this loop just carries.
 
+    The link loop yields every _LINKS_PER_YIELD links. A page with thousands of
+    links would otherwise be processed as one uninterrupted step, and while it
+    runs nothing else does: no other worker, no socket callback, no timer. The
+    rate limiter depends on those timers firing on time — a stall longer than
+    its interval sends two requests to the same host at once.
+
     A robots denial, a fetch failure and a non-HTML body are all ordinary
     outcomes, counted and stepped over. Nothing here should end the crawl.
     """
@@ -134,7 +146,9 @@ async def _worker(
                 continue
 
             hrefs = extract_links(response.text, response.final_url)
-            for href in hrefs:
+            for index, href in enumerate(hrefs):
+                if index % _LINKS_PER_YIELD == 0:
+                    await asyncio.sleep(0)
                 candidate_link = Link(url=href, source_url=response.final_url, depth=link.depth + 1)
                 verdict, accepted_link = frontier.add(candidate_link)
                 stats.links_checked += 1
