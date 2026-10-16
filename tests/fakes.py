@@ -12,6 +12,7 @@ with a side_effect list.
 """
 
 import asyncio
+from dataclasses import replace
 
 from siteaudit.errors import FetchError
 from siteaudit.models import Response
@@ -141,6 +142,23 @@ class FailingFetcher:
         if url in self._failing:
             raise FetchError(f"simulated transport failure for {url}")
         return await self._inner.get(url)
+
+
+class TimedFetcher:
+    """A FakeFetcher whose pages each report a chosen response time.
+
+    FakeFetcher says every page took 10 ms, which makes a ranking of the
+    slowest pages impossible to test. This one reports whatever the test says
+    each URL took.
+    """
+
+    def __init__(self, pages: dict[str, str], *, elapsed_ms: dict[str, float]) -> None:
+        self._inner = FakeFetcher(pages)
+        self._elapsed_ms = elapsed_ms
+
+    async def get(self, url: str) -> Response:
+        response = await self._inner.get(url)
+        return replace(response, elapsed_ms=self._elapsed_ms[url])
 
 
 class SlowFetcher:

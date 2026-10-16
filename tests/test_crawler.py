@@ -17,7 +17,7 @@ import pytest
 from siteaudit.crawler import crawl
 from siteaudit.errors import FetchError
 from siteaudit.models import Response
-from tests.fakes import DenyingRobots, FakeFetcher, FakeRobots, SlowFetcher
+from tests.fakes import DenyingRobots, FakeFetcher, FakeRobots, SlowFetcher, TimedFetcher
 
 TIMEOUT = 5.0
 SEED = "https://e.com/0"
@@ -520,6 +520,25 @@ async def test_the_report_is_not_mutable_through_its_collections() -> None:
 
     with pytest.raises(AttributeError):
         report.slowest.append(("https://e.com/x", 1.0))  # type: ignore[attr-defined]
+
+
+async def test_the_report_names_the_ten_slowest_pages_slowest_first() -> None:
+    """slowest is the ten slowest pages in descending order, and only ten.
+
+    Twenty-six pages each report a different time. The report names the ten
+    slowest, slowest first, and the engine never held more than ten timings to
+    get there — a heap, not a list of every page sorted at the end.
+    """
+
+    pages = fan_out(25)
+    elapsed_ms = {url: float(n) for n, url in enumerate(pages)}
+    fetcher = TimedFetcher(pages, elapsed_ms=elapsed_ms)
+    report = await asyncio.wait_for(
+        crawl(SEED, fetcher=fetcher, robots=FakeRobots()), timeout=TIMEOUT
+    )
+
+    assert [ms for _, ms in report.slowest] == [float(n) for n in range(25, 15, -1)]
+    assert report.slowest[0] == ("https://e.com/25", 25.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
