@@ -1,4 +1,4 @@
-"""The crawl engine. Imports protocols and models, nothing concrete."""
+"""The crawl engine. Reaches every collaborator through a protocol; imports nothing concrete."""
 
 import asyncio
 import heapq
