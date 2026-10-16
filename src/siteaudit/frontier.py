@@ -55,12 +55,18 @@ class Frontier:
         The seed is validated at construction from what the user typed, but a
         site that canonicalises to www will redirect on the first request, and
         from then on every internal link is on the redirected host. Call this
-        once, after the seed fetch and before any link is added.
+        once, after the seed is fetched and before any of its links are added.
+
+        The final URL is marked as seen: it is the page the seed already
+        fetched, so the site's own link back to its home page is a duplicate
+        rather than a second fetch. Once anything beyond the seed has been
+        accepted, the crawl has committed to a host and rebinding is refused.
         """
 
-        if self._seen:
-            raise RuntimeError("rebind_seed must be called before any links are added")
+        if len(self._seen) > 1:
+            raise RuntimeError("rebind_seed must be called before any link beyond the seed")
         self._seed_url = _validated_seed(final_url)
+        self._seen.add(self._seed_url)
 
     def add(self, link: Link) -> tuple[Verdict, Link | None]:
         """Offer a link to the frontier and report what was decided.
