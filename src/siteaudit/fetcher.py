@@ -72,6 +72,13 @@ class HttpxFetcher:
         slot — deliberate, since that throttles the crawler against a slow host
         — but a worker backing off between retries does not, because by then
         this method has already returned.
+
+        `timeout` bounds the whole exchange — connect, headers and body — not
+        each network read. httpx applies its own timeout per operation, so a
+        server sending one byte just inside it could hold a request, a worker
+        and a semaphore slot open indefinitely. The deadline starts after the
+        rate limiter: time spent waiting for this host's turn is the crawler's
+        own politeness, not the server's slowness.
         """
 
         if self._client is None:
@@ -80,7 +87,10 @@ class HttpxFetcher:
             host = urlsplit(url).hostname or ""
             await self._limiter.acquire(host)
             try:
-                response = await self._client.get(url)
+                async with asyncio.timeout(self._timeout):
+                    response = await self._client.get(url)
+            except TimeoutError as exc:
+                raise FetchError(f"no full response within {self._timeout}s: {url}") from exc
             except httpx.HTTPError as exc:
                 raise FetchError(f"could not fetch {url}: {exc}") from exc
 
