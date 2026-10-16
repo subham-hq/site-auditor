@@ -398,6 +398,28 @@ async def test_robots_denial_is_counted_and_skipped() -> None:
     assert report.completed is True
 
 
+async def test_a_malformed_href_does_not_end_the_crawl() -> None:
+    """One unparseable href is counted and stepped over; the crawl carries on.
+
+    urljoin raises ValueError on a malformed bracketed host. Before the parser
+    passed such hrefs through, this one link ended the whole crawl with an
+    ExceptionGroup and no report. links_checked is 3 because the broken href is
+    still offered to the frontier — it becomes a MALFORMED verdict instead of
+    disappearing.
+    """
+
+    pages = {
+        SEED: '<a href="http://[::1">broken</a> <a href="https://e.com/1">fine</a>',
+        "https://e.com/1": '<a href="https://e.com/2">fine</a>',
+        "https://e.com/2": "",
+    }
+    report = await asyncio.wait_for(
+        crawl(SEED, fetcher=FakeFetcher(pages), robots=FakeRobots()), timeout=TIMEOUT
+    )
+    assert report.pages_crawled == 3
+    assert report.links_checked == 3
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # The report
 # ─────────────────────────────────────────────────────────────────────────────
