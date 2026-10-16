@@ -23,7 +23,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with: { enable-cache: true }
       - run: uv sync --all-extras --dev
-      - run: uv run mypy --strict src/
+      - run: uv run mypy --strict src/ tests/
 
   test:
     runs-on: ubuntu-latest
