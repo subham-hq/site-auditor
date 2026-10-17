@@ -2,7 +2,6 @@ from urllib.parse import (
     parse_qsl,
     quote,
     urlencode,
-    urljoin,
     urlsplit,
     urlunsplit,
 )
@@ -20,22 +19,6 @@ TRACKING_PARAMS = {
 }
 
 SUPPORTED_SCHEMES = {"http", "https"}
-
-
-def resolve_url(base_url: str, relative_url: str) -> str:
-    """Turn a link found in a page into an absolute URL.
-
-    HTML links are usually relative — "setup.html", "../api/", "/about",
-    "//cdn.example.com/x.js" — and only mean something next to the page they
-    were found on. Resolution against the base URL happens first in the
-    pipeline, before normalization or any of the filters, because those all
-    assume an absolute URL.
-
-    Non-HTTP schemes such as mailto: pass through unchanged; is_crawlable
-    rejects them at the next step.
-    """
-
-    return urljoin(base_url, relative_url)
 
 
 def normalize_url(url: str) -> str:

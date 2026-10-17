@@ -1,8 +1,6 @@
 import pytest
 
-from siteaudit.urls import is_crawlable, is_same_host, normalize_url, resolve_url
-
-BASE = "https://e.com/docs/guide/intro.html"
+from siteaudit.urls import is_crawlable, is_same_host, normalize_url
 
 
 @pytest.mark.parametrize(
@@ -69,8 +67,8 @@ def test_normalize_url_is_idempotent(raw: str) -> None:
         ("tel:+911234", False),
         ("data:text/html,x", False),
         ("ftp://e.com/f", False),
-        # relative URLs have no scheme — this is why is_crawlable runs
-        # after resolve_url, never before it
+        # relative URLs have no scheme — this is why is_crawlable runs on
+        # links extract_links has already resolved, never on raw hrefs
         ("/about", False),
         ("#section", False),
         ("", False),
@@ -102,25 +100,3 @@ def test_is_crawlable(raw: str, expected: bool) -> None:
 )
 def test_is_same_host(raw_url_1: str, raw_url_2: str, expected: bool) -> None:
     assert is_same_host(raw_url_1, raw_url_2) is expected
-
-
-@pytest.mark.parametrize(
-    ("href", "expected"),
-    [
-        ("setup.html", "https://e.com/docs/guide/setup.html"),
-        ("../api/", "https://e.com/docs/api/"),
-        ("/about", "https://e.com/about"),
-        # protocol-relative links inherit the base scheme
-        ("//cdn.e.com/x.js", "https://cdn.e.com/x.js"),
-        # an absolute href wins outright
-        ("https://other.com/a", "https://other.com/a"),
-        # fragment- and query-only hrefs attach to the base page
-        ("#section", "https://e.com/docs/guide/intro.html#section"),
-        ("?page=2", "https://e.com/docs/guide/intro.html?page=2"),
-        ("", "https://e.com/docs/guide/intro.html"),
-        # non-HTTP schemes pass through untouched — is_crawlable rejects them next
-        ("mailto:a@b.com", "mailto:a@b.com"),
-    ],
-)
-def test_resolve_url(href: str, expected: str) -> None:
-    assert resolve_url(BASE, href) == expected
